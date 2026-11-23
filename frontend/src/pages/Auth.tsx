@@ -1,0 +1,206 @@
+import { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Mail, Lock, User, Loader2, ArrowLeft, Shield, Zap, Eye, EyeOff, ArrowRight, CheckCircle2, Send } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { z } from 'zod';
+import { PageMeta } from '@/components/seo/PageMeta';
+import '@/styles/member-experience.css';
+
+const GRADIENT = 'var(--member-action-gradient)';
+
+const loginSchema = z.object({
+  email: z.string().trim().email('Invalid email address'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+});
+
+const signupSchema = z.object({
+  email: z.string().trim().email('Invalid email address'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  fullName: z.string().trim().min(2, 'Name must be at least 2 characters'),
+});
+
+export default function Auth() {
+  const [isLogin, setIsLogin] = useState(true);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [showVerifyEmail, setShowVerifyEmail] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const { signIn, signUp, user, isLoading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isLoading && user) navigate('/engagement-order');
+  }, [user, isLoading, navigate]);
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(''); setSuccessMessage(''); setIsSubmitting(true);
+    try {
+      const trimmedEmail = email.trim().toLowerCase();
+      if (!trimmedEmail || !z.string().email().safeParse(trimmedEmail).success) {
+        setError('Please enter a valid email address'); setIsSubmitting(false); return;
+      }
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, { redirectTo: `${window.location.origin}/auth` });
+      if (error) setError(error.message); else setSuccessMessage('Password reset email sent! Check your inbox.');
+    } catch { setError('Something went wrong.'); }
+    finally { setIsSubmitting(false); }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(''); setSuccessMessage(''); setIsSubmitting(true);
+    try {
+      if (isLogin) {
+        const v = loginSchema.safeParse({ email, password });
+        if (!v.success) { setError(v.error.errors[0].message); setIsSubmitting(false); return; }
+        const { error } = await signIn(email, password);
+        if (error) {
+          const msg = error.message.toLowerCase();
+          if (msg.includes('invalid login credentials')) setError('Incorrect email or password.');
+          else if (msg.includes('email not confirmed')) setError('Please verify your email first.');
+          else if (msg.includes('rate limit')) setError('Too many attempts. Try again in 5 mins.');
+          else setError('Login failed.');
+          setIsSubmitting(false); return;
+        }
+        navigate('/engagement-order', { replace: true });
+      } else {
+        const v = signupSchema.safeParse({ email, password, fullName });
+        if (!v.success) { setError(v.error.errors[0].message); setIsSubmitting(false); return; }
+        const { error } = await signUp(email, password, fullName);
+        if (error) {
+          const msg = error.message.toLowerCase();
+          if (msg.includes('already registered')) setError('This email is already registered.');
+          else if (msg.includes('rate limit')) setError('Too many attempts. Wait 5 minutes.');
+          else setError(error.message || 'Signup failed.');
+          setIsSubmitting(false); return;
+        }
+        setSuccessMessage('Account created successfully!');
+        setTimeout(() => setIsLogin(true), 2000);
+      }
+    } catch (err: any) {
+      if (!err?.message?.includes('abort')) setError('Something went wrong. Please try again.');
+    } finally { setIsSubmitting(false); }
+  };
+
+  const inputClass = "h-11 rounded-lg border-border bg-card focus:border-primary focus:ring-2 focus:ring-primary/15 text-foreground font-medium px-3 placeholder:text-muted-foreground transition-all";
+
+  return (
+    <div className="member-shell member-auth flex items-center justify-center px-6 py-12 relative overflow-hidden">
+      <PageMeta
+        title={isLogin ? 'Sign in — ZoloSMM' : 'Create your account — ZoloSMM'}
+        description="Sign in or create your free ZoloSMM account to launch AI-powered Instagram, YouTube and TikTok growth campaigns. No credit card required."
+        canonicalPath="/auth"
+      />
+      <div className="member-auth-card relative">
+          {/* Logo */}
+          <div className="flex items-center justify-center mb-6">
+            <img src="/zolo-logo.png" alt="ZoloSMM" className="h-12 w-12 rounded-full object-cover bg-white ring-2 ring-blue-100 shadow-md" />
+          </div>
+
+          <Link to="/" className="inline-flex items-center gap-1.5 text-[12px] font-medium mb-5" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            <ArrowLeft className="w-3.5 h-3.5" /> Back to home
+          </Link>
+
+          <h1 className="text-3xl font-black tracking-[-0.02em] mb-1" style={{ color: 'hsl(var(--foreground))' }}>
+            {isForgotPassword ? 'Reset password' : isLogin ? 'Welcome back' : 'Create account'}
+          </h1>
+          <p className="text-[14px] mb-5" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            {isForgotPassword ? 'Enter your email to receive a reset link.' : isLogin ? 'Sign in to your ZoloSMM account.' : 'Get started for free — no credit card.'}
+          </p>
+
+
+          {showVerifyEmail ? (
+            <div className="text-center py-8">
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6" style={{ background: 'hsl(var(--secondary))' }}>
+                <Mail className="w-7 h-7" style={{ color: 'hsl(var(--primary))' }} />
+              </div>
+              <h3 className="text-xl font-bold mb-2" style={{ color: 'hsl(var(--foreground))' }}>Check your inbox</h3>
+              <p className="text-[13px] mb-2" style={{ color: 'hsl(var(--muted-foreground))' }}>Verification link sent to:</p>
+              <p className="text-[13px] font-semibold mb-6" style={{ color: 'hsl(var(--foreground))' }}>{email}</p>
+              <Button variant="ghost" onClick={() => { setShowVerifyEmail(false); setIsLogin(true); }} className="text-[13px] font-bold" style={{ color: 'hsl(var(--primary))' }}>
+                ← Back to login
+              </Button>
+            </div>
+          ) : (
+            <form onSubmit={isForgotPassword ? handleForgotPassword : handleSubmit} className="space-y-4">
+              {isForgotPassword ? (
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-[12px] font-semibold mb-1.5 block" style={{ color: 'hsl(var(--muted-foreground))', textTransform: 'none', letterSpacing: 'normal' }}>Email</Label>
+                    <Input type="email" placeholder="name@example.com" value={email} onChange={e => setEmail(e.target.value)} className={inputClass} />
+                  </div>
+                  {error && <p className="text-[13px] font-medium" style={{ color: 'hsl(var(--destructive))' }}>{error}</p>}
+                  {successMessage && <p className="text-[13px] font-medium" style={{ color: 'hsl(var(--primary))' }}>{successMessage}</p>}
+                  <Button variant="ghost" type="submit" disabled={isSubmitting}
+                    className="w-full h-12 rounded-xl text-[13.5px] font-bold text-white flex items-center justify-center gap-2 disabled:opacity-70"
+                    style={{ background: GRADIENT, boxShadow: 'var(--shadow-soft)' }}>
+                    {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Send reset link <ArrowRight className="w-3.5 h-3.5" /></>}
+                  </Button>
+                  <Button variant="ghost" type="button" onClick={() => setIsForgotPassword(false)} className="w-full text-center text-[13px] font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                    Back to login
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {!isLogin && (
+                    <div>
+                      <Label className="text-[12px] font-semibold mb-1.5 block" style={{ color: 'hsl(var(--muted-foreground))', textTransform: 'none', letterSpacing: 'normal' }}>Full name</Label>
+                      <Input placeholder="John Doe" value={fullName} onChange={e => setFullName(e.target.value)} className={inputClass} />
+                    </div>
+                  )}
+                  <div>
+                    <Label className="text-[12px] font-semibold mb-1.5 block" style={{ color: 'hsl(var(--muted-foreground))', textTransform: 'none', letterSpacing: 'normal' }}>Email</Label>
+                    <Input type="email" placeholder="name@example.com" value={email} onChange={e => setEmail(e.target.value)} className={inputClass} />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <Label className="text-[12px] font-semibold" style={{ color: 'hsl(var(--muted-foreground))', textTransform: 'none', letterSpacing: 'normal' }}>Password</Label>
+                      {isLogin && (
+                        <Button variant="ghost" type="button" onClick={() => setIsForgotPassword(true)} className="text-[11px] font-semibold" style={{ color: 'hsl(var(--primary))' }}>
+                          Forgot password?
+                        </Button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <Input type={showPassword ? 'text' : 'password'} placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} className={`${inputClass} pr-11`} />
+                      <Button variant="ghost" type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3.5 top-1/2 -translate-y-1/2" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {error && <p className="text-[13px] font-medium" style={{ color: 'hsl(var(--destructive))' }}>{error}</p>}
+                  {successMessage && <p className="text-[13px] font-medium" style={{ color: 'hsl(var(--primary))' }}>{successMessage}</p>}
+
+                  <Button variant="ghost" type="submit" disabled={isSubmitting}
+                    className="w-full h-12 rounded-xl text-[13.5px] font-bold text-white flex items-center justify-center gap-2 disabled:opacity-70 transition-transform hover:-translate-y-0.5"
+                    style={{ background: GRADIENT, boxShadow: 'var(--shadow-soft)' }}>
+                    {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <>{isLogin ? 'Sign in' : 'Create account'} <ArrowRight className="w-3.5 h-3.5" /></>}
+                  </Button>
+
+                  <p className="text-center text-[13px]" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                    {isLogin ? "Don't have an account? " : 'Already have an account? '}
+                    <Button variant="ghost" type="button" onClick={() => { setIsLogin(!isLogin); setError(''); setSuccessMessage(''); }} className="font-bold" style={{ color: 'hsl(var(--primary))' }}>
+                      {isLogin ? 'Sign up' : 'Sign in'}
+                    </Button>
+                  </p>
+                </div>
+              )}
+            </form>
+          )}
+
+
+      </div>
+    </div>
+  );
+}

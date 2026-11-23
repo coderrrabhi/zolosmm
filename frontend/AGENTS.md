@@ -1,0 +1,29 @@
+# Project rules
+
+- Provider sync, re-import and mapping edits must preserve existing catalog selling prices; only explicit admin price edits change them, and bundle drafts stay visible until their saved values read back.
+
+- Keep floating member navigation styling and effect tokens in member-experience.css with inline decorative SVGs in MobileBottomNav; preserve its route targets so visual changes never alter ordering behavior.
+
+- Primary engagement bundles use the first active per-platform sort order; set_primary_bundle atomically reorders that platform under an admin check, and all pricing/dispatch paths use the explicitly selected bundle.
+
+- Render platform branding through the shared PlatformIcon and global brand tokens; keep service and category menus consistent.
+- Persist ordinary order dispatch provenance and reconcile only that provider's explicit status; member refreshes must be owner-scoped and never resend orders or credit wallets.
+
+- Route committed payment-credit notifications through the dedicated fund-alert bot, separate from operational/fraud alerts, and HTML-escape identity fields so payment helpers share safe Telegram routing.
+
+- Generate provider funding reports in an admin-only function using fresh upstream rates, unsent work only, and historical paid totals for user exposure; never infer provider costs from mutable retail prices.
+- Share verified provider reporting between the admin page and the private fund-bot webhook; require a webhook secret and configured chat allowlist, deduplicate updates, and bound upstream and page waits so failures never hang indefinitely.
+
+- Keep ads website-link validation in `src/lib/ads-link.ts` and reuse it for single and mass orders so network-independent acceptance stays consistent.
+- Derive custom platform options from stored bundles; share manual ads-platform classification between frontend and functions so custom networks display and fulfil consistently without a schema migration.
+- Filter order platforms by the URL's ads section using shared manual-platform classification; legacy ads-platform links also select that section so social and ads navigation stay separate.
+- Model combined ads delivery as its own bundle item type and service so one quantity is billed once without relabelling historical separate-service orders.
+- Keep colors in the shared token layers (`src/index.css`, `src/styles/member-experience.css`, `src/pages/smm-home.css`) so one palette drives the whole app; don't add new hardcoded hex accents in components.
+- Keep Single Order on `/single-order` with `/orders` history and use `place-order` for server-priced wallet payment and mapped provider dispatch; never insert orders from the browser.
+- Use the shared searchable ServicePicker for Single Order category/service selection and scoped member tokens for its reference-style workspace; keep history table scrolling local so mobile navigation never overflows.
+- Query provider-backed Single Order services without the persistent engagement cache and invalidate that catalog after admin changes so imports appear immediately without bundles.
+- Sort Single Order categories through the tested category-order helper so platform grouping and engagement priority remain consistent without changing prices or provider mappings.
+- Keep optional bundle quantity limits on bundle_items and resolve them with the shared bundle-quantity policy in member validation and server scheduling; never modify Single Order service limits to implement bundle overrides.
+- Use the shared single-order policy for quantity validation and final per-1000 pricing so the displayed charge and server debit agree without double markup.
+- When deploying to the VPS, never overwrite its `.env`; the live build must point at the self-hosted backend (`https://api.multysmm.com`), not Lovable Cloud, or live users, admins and bundles disappear.
+- The live MultySMM stack runs on the new shared VPS (credentials in the NEW_VPS_* secrets) beside other sites; touch only the `multysmm` nginx site, `/var/www/multysmm` and `/root/supabase/docker`, and start backend services with `--no-deps` (studio, pooler, meta and imgproxy stay off to fit memory).

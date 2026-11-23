@@ -1,0 +1,3 @@
+ALTER TABLE public.bundle_items ADD COLUMN IF NOT EXISTS min_quantity_override integer, ADD COLUMN IF NOT EXISTS max_quantity_override integer;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='bundle_quantity_overrides_valid') THEN ALTER TABLE public.bundle_items ADD CONSTRAINT bundle_quantity_overrides_valid CHECK ((min_quantity_override IS NULL OR min_quantity_override >= 1) AND (max_quantity_override IS NULL OR max_quantity_override >= 1) AND (min_quantity_override IS NULL OR max_quantity_override IS NULL OR max_quantity_override >= min_quantity_override)); END IF; END $$;
+NOTIFY pgrst, 'reload schema';

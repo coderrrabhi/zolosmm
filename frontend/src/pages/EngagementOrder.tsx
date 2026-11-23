@@ -1,0 +1,1646 @@
+import { useState, useMemo, useEffect, useCallback, useRef, memo } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { useCurrency } from "@/hooks/useCurrency";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { chooseBundle, platformBundles } from "@/lib/bundle-selection";
+import { bundleQuantityLimits } from '../../supabase/functions/_shared/bundle-quantity-policy';
+import { Package } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
+} from "@/components/ui/alert-dialog";
+import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
+import { isValidAdsLink } from "@/lib/ads-link";
+import { isManualAdsPlatform, isAdsOrderSection, orderPlatforms } from '@/lib/platform-options';
+import { PlatformSelector } from "@/components/engagement/PlatformSelector";
+
+import { QuantitySelector } from "@/components/engagement/QuantitySelector";
+import { EngagementTypeCard } from "@/components/engagement/EngagementTypeCard";
+import { DeliveryPreview } from "@/components/engagement/DeliveryPreview";
+import { LiveGrowthChart } from "@/components/engagement/LiveGrowthChart";
+import {
+  EngagementType,
+  EngagementConfig,
+  DEFAULT_RATIOS,
+  DEFAULT_ORGANIC_SETTINGS,
+  EngagementBundle,
+  BundleItem
+} from "@/lib/engagement-types";
+import {
+  ControlPoint,
+  DrawModeState,
+  createInitialPoints,
+  curveToSchedule,
+  calculateQuantitiesFromCurve,
+} from "@/lib/curve-to-schedule";
+import { Loader2, Rocket, Link as LinkIcon, Wallet, RefreshCw, Eye, Heart, MessageCircle, Bookmark, Share2, AlertTriangle } from "lucide-react";
+import { useDebounce } from "@/hooks/useDebounce";
+import { FullOrganicConfig } from "@/lib/organic-algorithm";
+
+type EngagementConfigs = Record<string, EngagementConfig>;
+
+// All possible engagement types - will be filtered based on bundle
+const ALL_ENGAGEMENT_TYPES: EngagementType[] = ['views', 'likes', 'comments', 'saves', 'shares', 'reposts', 'followers', 'subscribers', 'watch_hours', 'retweets'];
+
+// Local formatPrice for micro-transactions (USD-only raw formatting)
+const formatPriceRaw = (price: number): string => {
+  if (price === 0) return '0.00';
+  if (price >= 0.01) return price.toFixed(2);
+  if (price >= 0.0001) return price.toFixed(4);
+  if (price >= 0.000001) return price.toFixed(6);
+  return price.toFixed(8);
+};
+
+// Detect platform from a URL (module scope so it can be used in memos)
+// Strict platform detection: requires a proper http(s) URL with a recognized
+// hostname AND a non-empty path (post/profile/reel). Random text, plain
+// usernames, emails, phone numbers, or bare domains all return null.
+const PLATFORM_HOSTS: Record<string, string[]> = {
+  instagram: ['instagram.com', 'www.instagram.com', 'instagr.am', 'www.instagr.am'],
+  youtube: ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'www.youtu.be'],
+  tiktok: ['tiktok.com', 'www.tiktok.com', 'm.tiktok.com', 'vm.tiktok.com', 'vt.tiktok.com'],
+  twitter: ['twitter.com', 'www.twitter.com', 'x.com', 'www.x.com', 'mobile.twitter.com'],
+  facebook: ['facebook.com', 'www.facebook.com', 'm.facebook.com', 'fb.com', 'www.fb.com', 'fb.watch'],
+  telegram: ['t.me', 'telegram.me', 'www.t.me', 'www.telegram.me'],
+};
+
+const detectPlatformFromUrl = (raw: string): string | null => {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 2048) return null;
+  // Must start with http(s) — reject random text, usernames, emails, phones.
+  if (!/^https?:\/\//i.test(trimmed)) return null;
+  let u: URL;
+  try {
+    u = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  const host = u.hostname.toLowerCase();
+  // Path must have something after the leading slash (post/profile/reel/etc).
+  const pathOk = u.pathname.replace(/\/+$/, '').length > 1;
+  if (!pathOk) return null;
+  for (const [platform, hosts] of Object.entries(PLATFORM_HOSTS)) {
+    if (hosts.includes(host)) return platform;
+  }
+  return null;
+};
+
+
+type IntervalUnit = 'minutes' | 'hours' | 'days';
+
+const normalizeRunCount = (value: unknown): number | undefined => {
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+};
+
+const intervalToMinutes = (value: unknown, unit: unknown): number | undefined => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  const normalizedUnit = String(unit || 'minutes').toLowerCase() as IntervalUnit;
+  if (normalizedUnit === 'days') return Math.round(n * 1440);
+  if (normalizedUnit === 'hours') return Math.round(n * 60);
+  return Math.round(n);
+};
+
+const minutesToIntervalParts = (minutes: number): { value: number; unit: IntervalUnit } => {
+  if (minutes >= 1440 && minutes % 1440 === 0) return { value: minutes / 1440, unit: 'days' };
+  if (minutes >= 60 && minutes % 60 === 0) return { value: minutes / 60, unit: 'hours' };
+  return { value: minutes, unit: 'minutes' };
+};
+
+const averageIntervalFromRuns = (runs?: { scheduled_at?: string }[]): number | undefined => {
+  if (!runs || runs.length < 2) return undefined;
+  const times = runs
+    .map((run) => new Date(run.scheduled_at || '').getTime())
+    .filter((time) => Number.isFinite(time))
+    .sort((a, b) => a - b);
+  if (times.length < 2) return undefined;
+  const gaps = times.slice(1).map((time, index) => time - times[index]);
+  return Math.max(1, Math.round((gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length) / 60000));
+};
+
+export default function EngagementOrder() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const adsSection = isAdsOrderSection(location.search);
+  const repeatFrom = (location.state as { repeatFrom?: number } | null)?.repeatFrom;
+  const { user, profile, isLoading: authLoading, isAdmin, wallet, refreshWallet } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { formatPrice, rates } = useCurrency();
+  // Pricing now comes from bundle_items.price_per_k (admin-controlled per type).
+
+  // Pricing tables (bundle_items/engagement_bundles/services) change rarely and are
+  // admin-managed. Realtime subscription per-user (was 100k+ channels at scale) removed.
+  // React Query staleTime (10-30 min) refreshes prices naturally on next mount.
+
+
+  // Form State
+  const [platform, setPlatform] = useState(() => new URLSearchParams(location.search).get('platform') || 'instagram');
+  const [link, setLink] = useState('');
+  const [selectedBundleId, setSelectedBundleId] = useState<string | null>(null);
+  // Mass Order mode state
+  const [orderMode, setOrderMode] = useState<'single' | 'mass'>(
+    () => (new URLSearchParams(location.search).get('mode') === 'mass' ? 'mass' : 'single')
+  );
+  // Sync mode with URL query (?mode=mass) so sidebar navigation switches modes
+  useEffect(() => {
+    const mode = new URLSearchParams(location.search).get('mode');
+    setOrderMode(mode === 'mass' ? 'mass' : 'single');
+    const p = new URLSearchParams(location.search).get('platform');
+    if (p) setPlatform(p);
+  }, [location.search]);
+  const [massLinksText, setMassLinksText] = useState('');
+  const [massConfirmOpen, setMassConfirmOpen] = useState(false);
+  const [massProgress, setMassProgress] = useState<{
+    running: boolean; current: number; total: number; success: number;
+    failed: { link: string; error: string }[]; done: boolean;
+  }>({ running: false, current: 0, total: 0, success: 0, failed: [], done: false });
+  const [baseQuantity, setBaseQuantity] = useState(10000);
+  // Debounce base quantity for expensive recalculations
+  const debouncedBaseQuantity = useDebounce(baseQuantity, 200);
+  const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
+  const [previewSchedules, setPreviewSchedules] = useState<Record<string, { scheduled_at: string; quantity_to_send: number; base_quantity: number; variance_applied: number; peak_multiplier: number }[]>>({});
+
+  // Draw mode state for custom curve editing
+  const [drawModeState, setDrawModeState] = useState<DrawModeState>({
+    isEnabled: false,
+    activeType: null,
+    points: {} as Record<EngagementType, ControlPoint[]>,
+  });
+
+  // Engagement configs - initialize empty, will be populated when bundle loads
+  const [engagements, setEngagements] = useState<EngagementConfigs>({});
+
+  // Track per-type user-edited quantities so auto-ratio sync doesn't overwrite them.
+  // Once a user manually edits a type's quantity, it stays locked to their value
+  // regardless of base quantity changes — they can edit each type independently.
+  const userEditedQtyRef = useRef<Set<EngagementType>>(new Set());
+
+  // Local settings toggles (defaulted from localStorage)
+  const [isOrganicMode, setIsOrganicMode] = useState(true);
+  const [isAutoRatios, setIsAutoRatios] = useState(true);
+  // User-saved custom ratios from Settings page (stored in localStorage)
+  const [userSavedRatios, setUserSavedRatios] = useState<Record<string, number> | null>(null);
+
+  // Sync with localStorage on load
+  useEffect(() => {
+    try {
+      const savedOrganic = localStorage.getItem('organic_settings');
+      if (savedOrganic) {
+        const parsed = JSON.parse(savedOrganic);
+        if (typeof parsed.isOrganicMode === 'boolean') setIsOrganicMode(parsed.isOrganicMode);
+        if (parsed.ratios) setUserSavedRatios(parsed.ratios);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // ============ REPEAT ORDER (prefill from previous order) ============
+  const [repeatSource, setRepeatSource] = useState<any>(null);
+  const [repeatError, setRepeatError] = useState<string | null>(null);
+  const [repeatWarnings, setRepeatWarnings] = useState<string[]>([]);
+  const prefillAppliedRef = useRef(false);
+
+  useEffect(() => {
+    if (!repeatFrom || !user?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('engagement_orders')
+        .select(`
+          id, order_number, bundle_id, base_quantity, is_organic_mode,
+          variance_percent, peak_hours_enabled, config_snapshot,
+          items:engagement_order_items(
+            engagement_type, quantity, drip_qty_per_run, drip_interval, drip_interval_unit, speed_preset,
+            runs:organic_run_schedule(scheduled_at)
+          ),
+          bundle:engagement_bundles(platform, is_active)
+        `)
+        .eq('user_id', user.id)
+        .eq('order_number', repeatFrom)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (error || !data) {
+        setRepeatError('Original order not found or you do not have access.');
+        return;
+      }
+      const bundle: any = data.bundle;
+      if (!bundle || !bundle.platform || bundle.is_active === false) {
+        setRepeatError('This bundle is no longer available. Please choose a similar service.');
+        return;
+      }
+      const snap: any = (data as any).config_snapshot || null;
+      setRepeatSource(data);
+      setSelectedBundleId(data.bundle_id);
+      setPlatform(snap?.platform || bundle.platform);
+      setBaseQuantity(snap?.base_quantity ?? data.base_quantity ?? 10000);
+      setIsOrganicMode(snap?.is_organic_mode ?? !!data.is_organic_mode);
+      setIsAutoRatios(snap?.is_auto_ratios ?? false);
+      setLink('');
+    })();
+    return () => { cancelled = true; };
+  }, [repeatFrom, user?.id]);
+
+
+
+
+
+
+
+  // Fetch ALL active bundles WITH items to know which platforms are available
+  const { data: allBundles } = useQuery({
+    queryKey: ['all-bundles-with-items'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('engagement_bundles')
+        .select(`
+          platform,
+          items:bundle_items(id, service_id)
+        `)
+        .eq('is_active', true);
+      if (error) throw error;
+      return data;
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    placeholderData: keepPreviousData,
+  });
+
+  // Get unique platforms that have active bundles with engagement items
+  const availablePlatforms = useMemo(() => {
+    console.log('[EngagementOrder] allBundles:', allBundles);
+    if (!allBundles) return [];
+    // Show platforms that have at least one bundle with items configured
+    const platforms = allBundles
+      .filter(b => b.items?.some((item) => item.service_id))
+      .map(b => b.platform);
+    const result = orderPlatforms(platforms, adsSection);
+    console.log('[EngagementOrder] availablePlatforms:', result);
+    return result;
+  }, [allBundles, adsSection]);
+
+  // Auto-select first available platform if current selection has no bundles
+  useEffect(() => {
+    if (availablePlatforms.length > 0 && !availablePlatforms.includes(platform)) {
+      setPlatform(availablePlatforms[0]);
+    }
+  }, [availablePlatforms, platform]);
+
+  // Fetch bundles for selected platform
+  const { data: bundles, isLoading: bundlesLoading } = useQuery({
+    queryKey: ['bundles', platform],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('engagement_bundles')
+        .select(`
+          *,
+          items:bundle_items(
+            *,
+            service:services(id, name, price, min_quantity, max_quantity)
+          )
+        `)
+        .eq('platform', platform)
+        .eq('is_active', true)
+        .order('sort_order');
+      if (error) throw error;
+      return data as (EngagementBundle & { items: (BundleItem & { service: any })[] })[];
+    },
+    enabled: !!platform && availablePlatforms.includes(platform),
+    staleTime: 0,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
+  });
+
+  const bundleOptions = useMemo(() => platformBundles(bundles || [], platform), [bundles, platform]);
+  const selectedBundle = useMemo(() => chooseBundle(bundles || [], platform, selectedBundleId), [bundles, platform, selectedBundleId]);
+  const seededBundleRef = useRef<string | null>(null);
+
+  // Get active engagement types from bundle
+  const activeEngagementTypes = useMemo<EngagementType[]>(() => {
+    const bundle = selectedBundle;
+    if (!bundle?.items) return [];
+    // Return unique engagement types sorted by preferred order
+    const types = bundle.items
+      .filter(item => item.service_id || item.service)
+      .map(item => item.engagement_type as EngagementType);
+    const uniqueTypes = [...new Set(types)];
+
+    const PREFERRED_ORDER: Record<string, number> = {
+      views: 1,
+      likes: 2,
+      comments: 3,
+      shares: 4,
+      reposts: 5,
+      saves: 6,
+    };
+
+    return uniqueTypes.sort((a, b) => (PREFERRED_ORDER[a] || 99) - (PREFERRED_ORDER[b] || 99));
+  }, [selectedBundle]);
+
+  // Base per-type quantities (used as "100%" reference for draw-mode scaling)
+  // Use debounced value for expensive calculations
+  const baseTypeQuantities = useMemo(() => {
+    const base: Record<EngagementType, number> = {} as Record<EngagementType, number>;
+    activeEngagementTypes.forEach((type) => {
+      // Use user's custom ratio if available from localStorage, else fallback to default
+      const userRatio = userSavedRatios?.[type];
+      const ratio = typeof userRatio === 'number' ? userRatio : DEFAULT_RATIOS[type];
+      base[type] = Math.round(debouncedBaseQuantity * (ratio / 100));
+    });
+    return base;
+  }, [debouncedBaseQuantity, activeEngagementTypes, userSavedRatios]);
+  // Fetch ALL active services as fallback for price lookup
+  const { data: allServices } = useQuery({
+    queryKey: ['all-active-services'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('services')
+        .select('id, name, price, min_quantity, max_quantity, category')
+        .eq('is_active', true)
+        .order('price', { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Get service prices from bundle — with auto-match fallback for unlinked items
+  const servicePrices = useMemo(() => {
+    const bundle = selectedBundle;
+    if (!bundle?.items) return {};
+
+    // Keywords to match engagement types in service names
+    const typeKeywords: Record<string, string[]> = {
+      views: ['view'],
+      likes: ['like'],
+      comments: ['comment'],
+      saves: ['save'],
+      shares: ['share'],
+      reposts: ['repost'],
+      followers: ['follow'],
+      subscribers: ['subscrib'],
+      watch_hours: ['watch'],
+      retweets: ['retweet'],
+    };
+
+    const prices: Record<string, { pricePerK: number; serviceId: string | null; minQuantity: number; maxQuantity?: number }> = {};
+    bundle.items.forEach(item => {
+      const keywords = typeKeywords[item.engagement_type] || [item.engagement_type];
+      const platName = platform.toLowerCase();
+      const matchingServices = (allServices || []).filter(s => {
+        const name = s.name?.toLowerCase() || '';
+        const cat = s.category?.toLowerCase() || '';
+        const matchesPlatform = name.includes(platName) || cat.includes(platName);
+        const matchesType = keywords.some(kw => name.includes(kw));
+        return matchesPlatform && matchesType;
+      });
+      const positiveMins = matchingServices.map(s => s.min_quantity ?? 0).filter(n => n > 0);
+      const lowestMatchedMin = positiveMins.length > 0 ? Math.min(...positiveMins) : undefined;
+
+      // PRIORITY 0: admin-set per-bundle-item price overrides everything
+      const manualPricePerK = typeof item.price_per_k === 'number' && item.price_per_k > 0
+        ? Number(item.price_per_k)
+        : null;
+
+      // 1) Try the linked service first, but show the lowest provider minimum across the rotation pool
+      if (item.service && (manualPricePerK !== null || item.service.price > 0)) {
+        prices[item.engagement_type] = {
+          pricePerK: manualPricePerK ?? item.service.price,
+          serviceId: item.service.id,
+          ...bundleQuantityLimits(item, item.service),
+        };
+        return;
+      }
+
+      // 2) Fallback: auto-match from all active services by platform + engagement type
+      if (allServices && allServices.length > 0) {
+        const matches = matchingServices.filter(s => s.price > 0);
+
+        if (matches.length > 0) {
+          // Cheapest service for pricing
+          const match = matches.reduce((a, b) => (a.price <= b.price ? a : b));
+          // Lowest min across all matching providers (router can rotate)
+          const lowestMin = Math.min(...matches.map(s => s.min_quantity ?? 0).filter(n => n > 0));
+          prices[item.engagement_type] = {
+            pricePerK: manualPricePerK ?? match.price,
+            serviceId: match.id,
+            ...bundleQuantityLimits(item, match),
+          };
+          return;
+        }
+      }
+
+      // 3) Even if linked but price=0, still register the service for order routing
+      if (item.service) {
+        prices[item.engagement_type] = {
+          pricePerK: manualPricePerK ?? item.service.price,
+          serviceId: item.service.id,
+          ...bundleQuantityLimits(item, item.service),
+        };
+        return;
+      }
+
+      // 4) No linked service and no auto-match, but admin set a manual price → still register
+      if (manualPricePerK !== null) {
+        prices[item.engagement_type] = {
+          pricePerK: manualPricePerK,
+          serviceId: null,
+          ...bundleQuantityLimits(item, { min_quantity: lowestMatchedMin ?? 1 }),
+        };
+      }
+    });
+    // Enforce platform minimum of 100 for views regardless of provider.
+    // Pricing for views (and every other type) comes from bundle_items.price_per_k
+    // set by the admin — no hardcoded overrides.
+    if (prices['views'] && bundle.items.find(item => item.engagement_type === 'views')?.min_quantity_override == null) {
+      prices['views'] = {
+        ...prices['views'],
+        minQuantity: Math.max(100, prices['views'].minQuantity || 0),
+      };
+    }
+    return prices;
+  }, [selectedBundle, allServices, platform, rates]);
+
+  // Update engagement configs when bundle or base quantity changes
+  // Use debounced value to prevent excessive recalculations
+  useEffect(() => {
+    const bundle = selectedBundle;
+    if (!bundle?.items) return;
+
+    // Get all engagement types from bundle items
+    const bundleTypes = bundle.items
+      .map(item => item.engagement_type as EngagementType);
+
+    const uniqueBundleTypes = [...new Set(bundleTypes)];
+
+    const changedBundle = seededBundleRef.current !== bundle.id;
+    seededBundleRef.current = bundle.id;
+    if (changedBundle) {
+      userEditedQtyRef.current.clear();
+      setPreviewSchedules({});
+    }
+    setEngagements((previous) => {
+      const prev = changedBundle ? {} : previous;
+      const updated: EngagementConfigs = {};
+
+      uniqueBundleTypes.forEach((type) => {
+        // If auto-ratios is OFF, only enable 'views' by default
+        const isEnabledByDefault = isAutoRatios || type === 'views';
+
+        // Use user's custom ratio if available from localStorage, else fallback to default
+        const userRatio = userSavedRatios?.[type];
+        const ratioPercent = typeof userRatio === 'number' ? userRatio : (DEFAULT_RATIOS[type] ?? 1);
+
+        const ratioQuantity = Math.round(debouncedBaseQuantity * (ratioPercent / 100));
+
+        const serviceData = servicePrices[type];
+        const resolvedServiceId = serviceData?.serviceId ?? prev[type]?.serviceId ?? null;
+        const hasProviderService = Boolean(resolvedServiceId);
+        const serviceJustResolved = Boolean(prev[type] && !prev[type].serviceId && serviceData?.serviceId);
+
+        // Provider minimum se kam order kabhi nahi — ratio se computed quantity
+        // min (10 likes, 100 views...) se neeche aaye to min pe bump kar do.
+        const svcMin = serviceData?.minQuantity ?? prev[type]?.minQuantity ?? 0;
+        const quantity = svcMin > 0 && ratioQuantity > 0
+          ? Math.max(ratioQuantity, svcMin)
+          : ratioQuantity;
+
+        const isUserEdited = userEditedQtyRef.current.has(type);
+        const editedQty = prev[type]?.quantity ?? 0;
+        const editedClamped = svcMin > 0 && editedQty > 0 ? Math.max(editedQty, svcMin) : editedQty;
+        const finalQuantity = isUserEdited && prev[type]
+          ? editedClamped
+          : ((isAutoRatios || !prev[type]) ? quantity : prev[type].quantity);
+        const finalPrice = serviceData
+          ? (finalQuantity / 1000) * serviceData.pricePerK
+          : prev[type]?.price ?? 0;
+
+        updated[type] = {
+          type,
+          enabled: hasProviderService
+            ? (serviceJustResolved ? isEnabledByDefault : (prev[type] ? prev[type].enabled : isEnabledByDefault))
+            : false,
+          quantity: finalQuantity,
+          price: finalPrice,
+          serviceId: resolvedServiceId,
+          minQuantity: serviceData?.minQuantity ?? prev[type]?.minQuantity,
+          maxQuantity: serviceData?.maxQuantity ?? prev[type]?.maxQuantity,
+          // Per-type organic settings — PRESERVE prior values so Repeat Order
+          // (which restores runCount / timeLimitCustomMode) isn't clobbered by
+          // subsequent re-runs of this seed effect.
+          timeLimitHours: prev[type]?.timeLimitHours ?? DEFAULT_ORGANIC_SETTINGS.timeLimitHours,
+          timeLimitCustomMode: prev[type]?.timeLimitCustomMode ?? false,
+          variancePercent: prev[type]?.variancePercent ?? DEFAULT_ORGANIC_SETTINGS.variancePercent,
+          peakHoursEnabled: prev[type]?.peakHoursEnabled ?? DEFAULT_ORGANIC_SETTINGS.peakHoursEnabled,
+          runCount: prev[type]?.runCount,
+          runIntervalMinutes: prev[type]?.runIntervalMinutes,
+        };
+      });
+      return updated;
+    });
+  }, [debouncedBaseQuantity, selectedBundle, servicePrices, userSavedRatios, isAutoRatios]);
+
+  // Apply repeat-order per-type overrides once engagements are seeded from the bundle.
+  // Prefers the persisted config_snapshot (100% restore) and falls back to
+  // reconstructing values from stored drip fields for legacy orders.
+  useEffect(() => {
+    if (!repeatSource || prefillAppliedRef.current) return;
+    if (!selectedBundle) return;
+    const items: any[] = repeatSource.items || [];
+    const itemByType = new Map(items.map((item) => [String(item.engagement_type), item]));
+    const snap: any = (repeatSource as any).config_snapshot || null;
+    const snapEngagements: Record<string, any> = snap?.engagements || {};
+    const hasSnap = snap && Object.keys(snapEngagements).length > 0;
+    if (!hasSnap && items.length === 0) return;
+
+    // Only apply to types that BOTH exist in snapshot/items AND in the current bundle.
+    // Skip types no longer offered — otherwise `ready` stays false forever and the
+    // prefill (quantity / runCount / timeLimitHours) never fires, leaving defaults.
+    const rawTypes = hasSnap ? Object.keys(snapEngagements) : items.map((i) => i.engagement_type);
+    const typesToApply = rawTypes.filter((t) => !!engagements[t]);
+    const missingTypes = rawTypes.filter((t) => !engagements[t]);
+    if (typesToApply.length === 0) return;
+
+    const missingWarnings: string[] = [];
+
+    setEngagements((prev) => {
+      const updated: EngagementConfigs = { ...prev };
+      Object.keys(updated).forEach((k) => {
+        updated[k] = { ...updated[k], enabled: false };
+      });
+
+      if (hasSnap) {
+        // ---------- FULL SNAPSHOT RESTORE ----------
+        Object.entries(snapEngagements).forEach(([type, cfg]: [string, any]) => {
+          if (!updated[type]) {
+            missingWarnings.push(type);
+            return;
+          }
+          const svc = servicePrices[type];
+          const pricePerK = svc?.pricePerK ?? 0;
+          const qty = Math.max(1, Number(cfg.quantity) || 0);
+          const matchingItem = itemByType.get(type);
+          const actualRuns = Array.isArray(matchingItem?.runs) ? matchingItem.runs : [];
+          const restoredRunCount = normalizeRunCount(cfg.run_count) ?? (actualRuns.length > 0 ? actualRuns.length : undefined) ?? updated[type].runCount;
+          const restoredIntervalMinutes =
+            intervalToMinutes(cfg.run_interval_value, cfg.run_interval_unit) ??
+            intervalToMinutes(cfg.interval_value, cfg.interval_unit) ??
+            intervalToMinutes(cfg.drip_interval, cfg.drip_interval_unit) ??
+            averageIntervalFromRuns(actualRuns) ??
+            (Number.isFinite(Number(cfg.run_interval_minutes)) && Number(cfg.run_interval_minutes) > 0
+              ? Math.round(Number(cfg.run_interval_minutes))
+              : undefined) ??
+            (restoredRunCount && restoredRunCount > 1 && Number(cfg.time_limit_hours) > 0
+              ? Math.max(1, Math.round((Number(cfg.time_limit_hours) * 60) / (restoredRunCount - 1)))
+              : undefined);
+          const restoredTimeLimitHours = cfg.time_limit_hours ?? (
+            restoredIntervalMinutes && restoredRunCount && restoredRunCount > 1
+              ? (restoredIntervalMinutes * (restoredRunCount - 1)) / 60
+              : updated[type].timeLimitHours
+          );
+          updated[type] = {
+            ...updated[type],
+            enabled: !!cfg.enabled,
+            quantity: qty,
+            // Recompute price at CURRENT rates so charge reflects latest pricing,
+            // while every other setting stays identical to the original order.
+            price: (qty / 1000) * pricePerK,
+            timeLimitHours: restoredTimeLimitHours,
+            timeLimitCustomMode: cfg.time_limit_custom_mode ?? (restoredTimeLimitHours > 0),
+            variancePercent: cfg.variance_percent ?? updated[type].variancePercent,
+            peakHoursEnabled: cfg.peak_hours_enabled ?? updated[type].peakHoursEnabled,
+            runCount: restoredRunCount,
+            runIntervalMinutes: restoredIntervalMinutes,
+          };
+          userEditedQtyRef.current.add(type as EngagementType);
+        });
+      } else {
+        // ---------- LEGACY FALLBACK (reconstruct from drip fields) ----------
+        items.forEach((item) => {
+          const type = item.engagement_type as EngagementType;
+          if (!updated[type]) return;
+          const svc = servicePrices[type];
+          const pricePerK = svc?.pricePerK ?? 0;
+          const qty = Math.max(1, Number(item.quantity) || 0);
+
+          const dripQty = Math.max(1, Number(item.drip_qty_per_run) || qty);
+          const actualRuns = Array.isArray(item.runs) ? item.runs : [];
+          const runs = actualRuns.length > 0 ? actualRuns.length : Math.max(1, Math.ceil(qty / dripQty));
+          const interval = Number(item.drip_interval) || 0;
+          const unit = String(item.drip_interval_unit || 'minutes').toLowerCase();
+          const unitToHours = unit === 'days' ? 24 : unit === 'hours' ? 1 : unit === 'minutes' ? 1 / 60 : 1 / 60;
+          const computedHours = Math.round(Math.max(runs - 1, 1) * interval * unitToHours);
+          const timeLimitHours = computedHours > 0 ? computedHours : updated[type].timeLimitHours;
+
+          updated[type] = {
+            ...updated[type],
+            enabled: true,
+            quantity: qty,
+            price: (qty / 1000) * pricePerK,
+            variancePercent: repeatSource.variance_percent ?? updated[type].variancePercent,
+            peakHoursEnabled: repeatSource.peak_hours_enabled ?? updated[type].peakHoursEnabled,
+            timeLimitHours,
+            timeLimitCustomMode: computedHours > 0,
+            runCount: runs,
+            runIntervalMinutes: interval > 0 ? intervalToMinutes(interval, unit) : averageIntervalFromRuns(actualRuns),
+          };
+          userEditedQtyRef.current.add(type);
+        });
+      }
+      return updated;
+    });
+    prefillAppliedRef.current = true;
+
+    const allMissing = [...new Set([...missingWarnings, ...missingTypes])];
+    const limitWarnings: string[] = [];
+    typesToApply.forEach((type) => {
+      const cfg = hasSnap ? snapEngagements[type] : items.find((item) => item.engagement_type === type);
+      const svc = servicePrices[type];
+      if (!cfg || !svc) return;
+      if (hasSnap && !(cfg as any).enabled) return;
+      const qty = Math.max(1, Number((cfg as any).quantity) || 0);
+      const dripQty = Math.max(1, Number((cfg as any).drip_qty_per_run) || qty);
+      const runCount = normalizeRunCount((cfg as any).run_count) ?? Math.max(1, Math.ceil(qty / dripQty));
+      const maxRunsForCurrentMin = Math.max(1, Math.floor(qty / Math.max(1, svc.minQuantity ?? 1)));
+
+      if (svc.maxQuantity && qty > svc.maxQuantity) {
+        limitWarnings.push(`The original ${type} quantity (${qty.toLocaleString()}) exceeds the current service limit (${svc.maxQuantity.toLocaleString()}). Please adjust it before placing the order.`);
+      }
+      if ((svc.minQuantity ?? 0) > 0 && runCount > maxRunsForCurrentMin) {
+        limitWarnings.push(`The original ${type} runs (${runCount.toLocaleString()}) exceed the current limit (${maxRunsForCurrentMin.toLocaleString()}) for this quantity. Please adjust it before placing the order.`);
+      }
+    });
+    setRepeatWarnings(limitWarnings);
+    if (allMissing.length > 0) {
+      toast({
+        title: '⚠️ Some options unavailable',
+        description: `The original order used: ${allMissing.join(', ')} — these are no longer offered. All other settings were restored.`,
+      });
+    }
+    if (limitWarnings.length > 0) {
+      toast({
+        title: '⚠️ Current limits changed',
+        description: limitWarnings[0],
+        variant: 'destructive',
+      });
+    }
+    toast({
+      title: '✅ Order fully restored',
+      description: `Repeating Order #${repeatSource.order_number}. Just replace the link and click Place Order.`,
+    });
+  }, [repeatSource, selectedBundle, engagements, servicePrices, toast]);
+
+
+
+  const handleEngagementChange = useCallback((type: EngagementType, config: EngagementConfig) => {
+    setEngagements(prev => {
+      const prevQty = prev[type]?.quantity;
+      if (prevQty !== undefined && config.quantity !== prevQty) {
+        userEditedQtyRef.current.add(type);
+      }
+      return { ...prev, [type]: config };
+    });
+    // Reset draw mode when user manually changes quantity
+    if (drawModeState.isEnabled) {
+      setDrawModeState(prev => ({
+        ...prev,
+        points: {
+          ...prev.points,
+          [type]: createInitialPoints(type, config.quantity),
+        },
+      }));
+    }
+  }, [drawModeState.isEnabled]);
+
+  // Real-time: when user drags curve, update quantities instantly (and schedule updates automatically)
+  useEffect(() => {
+    if (!drawModeState.isEnabled) return;
+
+    const nextQuantities = calculateQuantitiesFromCurve(drawModeState.points, baseTypeQuantities);
+
+    setEngagements((prev) => {
+      let changed = false;
+      const updated: EngagementConfigs = { ...prev };
+
+      Object.keys(prev).forEach((type) => {
+        const engType = type as EngagementType;
+        const desired = nextQuantities[engType];
+        if (typeof desired !== 'number' || Number.isNaN(desired)) return;
+
+        // Clamp to provider/service minimum if present
+        const min = updated[engType]?.minQuantity ?? 0;
+        const clamped = min > 0 ? Math.max(min, desired) : desired;
+
+        if (clamped === updated[engType]?.quantity) return;
+
+        const prevQty = updated[engType]?.quantity || 0;
+        const pricePerK = prevQty > 0 ? ((updated[engType]?.price || 0) * 1000) / prevQty : 0;
+
+        updated[engType] = {
+          ...updated[engType],
+          quantity: clamped,
+          price: pricePerK > 0 ? (clamped / 1000) * pricePerK : updated[engType]?.price || 0,
+        };
+        changed = true;
+      });
+
+      return changed ? updated : prev;
+    });
+  }, [drawModeState.isEnabled, drawModeState.points, baseTypeQuantities]);
+
+  // Handle curve change from drawable chart (end-of-drag / preset / reset)
+  const handleCurveChange = useCallback((type: EngagementType, points: ControlPoint[]) => {
+    // Update the draw mode state with new points
+    setDrawModeState(prev => ({
+      ...prev,
+      points: { ...prev.points, [type]: points },
+    }));
+    // Refresh key kept for any downstream reset behavior
+    setPreviewRefreshKey(k => k + 1);
+  }, []);
+
+  const handleScheduleChange = useCallback((payload: {
+    schedules: FullOrganicConfig[];
+    customQuantities: Record<string, number>;
+  }) => {
+    const nextSchedules = payload.schedules.reduce((acc, schedule) => {
+      acc[schedule.engagementType] = schedule.runs.map((run) => {
+        const runId = `${schedule.engagementType}-${run.runNumber}`;
+        const quantity = payload.customQuantities[runId] ?? run.quantity;
+
+        return {
+          scheduled_at: run.scheduledAt.toISOString(),
+          quantity_to_send: quantity,
+          base_quantity: quantity,
+          variance_applied: run.varianceApplied,
+          peak_multiplier: run.peakMultiplier,
+        };
+      });
+
+      return acc;
+    }, {} as Record<string, { scheduled_at: string; quantity_to_send: number; base_quantity: number; variance_applied: number; peak_multiplier: number }[]>);
+
+    setPreviewSchedules(nextSchedules);
+  }, []);
+
+  // Calculate totals
+  const totalPrice = useMemo(() => {
+    return Object.values(engagements)
+      .filter(e => e.enabled)
+      .reduce((sum, e) => sum + e.price, 0);
+  }, [engagements]);
+
+  const totalEngagements = useMemo(() => {
+    return Object.values(engagements)
+      .filter(e => e.enabled)
+      .reduce((sum, e) => sum + e.quantity, 0);
+  }, [engagements]);
+
+  // Parse mass links: dedupe, trim, validate per platform
+  const parsedMassLinks = useMemo(() => {
+    const raw = massLinksText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const seen = new Set<string>();
+    const dedup: string[] = [];
+    for (const l of raw) { if (!seen.has(l)) { seen.add(l); dedup.push(l); } }
+    const analyzed = dedup.map(l => {
+      let reason: string | null = null;
+      let valid = false;
+      if (isManualAdsPlatform(platform)) return { link: l, valid: true, reason: null };
+      try {
+        const u = new URL(l);
+        if (!['http:', 'https:'].includes(u.protocol)) {
+          reason = 'Invalid URL';
+        } else {
+          const detected = isManualAdsPlatform(platform) ? (isValidAdsLink(l) ? platform : null) : detectPlatformFromUrl(l);
+          if (!detected) reason = 'Unsupported platform';
+          else if (detected !== platform) reason = `Not ${platform}`;
+          else valid = true;
+        }
+      } catch { reason = 'Invalid URL'; }
+      return { link: l, valid, reason };
+    });
+    return {
+      all: analyzed,
+      valid: analyzed.filter(a => a.valid),
+      invalid: analyzed.filter(a => !a.valid),
+      totalRaw: raw.length,
+    };
+  }, [massLinksText, platform]);
+
+  const massTotalCost = useMemo(
+    () => parsedMassLinks.valid.length * totalPrice,
+    [parsedMassLinks.valid.length, totalPrice]
+  );
+
+
+
+  // Shared: submit a single engagement order for a given link URL.
+  // Used by both Single mode (via mutation) and Mass mode (sequential loop).
+  const submitEngagementOrder = useCallback(async (linkUrl: string) => {
+    if (!user) throw new Error('Not authenticated');
+    const trimmed = (linkUrl || '').trim();
+    if (!trimmed) throw new Error('Please enter a valid link');
+
+    if (totalPrice <= 0) {
+      throw new Error('Invalid order total. Please select engagement types.');
+    }
+
+    // Provider min-quantity check
+    const belowMin = Object.entries(engagements)
+      .filter(([_, config]) => config.enabled)
+      .filter(([_, config]) => (config.minQuantity ?? 0) > 0)
+      .filter(([_, config]) => config.quantity < (config.minQuantity ?? 0))
+      .map(([type, config]) => ({
+        type, quantity: config.quantity, min: config.minQuantity as number,
+      }));
+
+    if (belowMin.length > 0) {
+      const first = belowMin[0];
+      throw new Error(
+        `${first.type} quantity ${first.quantity} is below minimum ${first.min}. Increase Base Quantity or edit that type.`
+      );
+    }
+
+    const aboveMax = Object.entries(engagements)
+      .filter(([_, config]) => config.enabled)
+      .filter(([_, config]) => (config.maxQuantity ?? 0) > 0)
+      .filter(([_, config]) => config.quantity > (config.maxQuantity ?? 0))
+      .map(([type, config]) => ({
+        type, quantity: config.quantity, max: config.maxQuantity as number,
+      }));
+
+    if (aboveMax.length > 0) {
+      const first = aboveMax[0];
+      throw new Error(
+        `The original ${first.type} quantity (${first.quantity.toLocaleString()}) exceeds the current service limit (${first.max.toLocaleString()}). Please adjust it before placing the order.`
+      );
+    }
+
+    const tooManyRuns = Object.entries(engagements)
+      .filter(([_, config]) => config.enabled && config.runCount && (config.minQuantity ?? 0) > 0)
+      .filter(([_, config]) => (config.runCount as number) > Math.floor(config.quantity / (config.minQuantity as number)))
+      .map(([type, config]) => ({
+        type,
+        runs: config.runCount as number,
+        max: Math.max(1, Math.floor(config.quantity / (config.minQuantity as number))),
+      }));
+
+    if (tooManyRuns.length > 0) {
+      const first = tooManyRuns[0];
+      throw new Error(
+        `The original ${first.type} runs (${first.runs.toLocaleString()}) exceed the current limit (${first.max.toLocaleString()}). Please adjust it before placing the order.`
+      );
+    }
+
+    const bundle = selectedBundle;
+    if (!bundle) throw new Error("Please choose an available bundle");
+
+    // Full snapshot of the user's configuration — persisted so Repeat Order
+    // can restore 100% of the original settings later, not just guessed values.
+    const configSnapshot = {
+      version: 1,
+      platform,
+      bundle_id: bundle?.id ?? null,
+      base_quantity: baseQuantity,
+      is_organic_mode: isOrganicMode,
+      is_auto_ratios: isAutoRatios,
+      total_price: totalPrice,
+      user_saved_ratios: userSavedRatios ?? null,
+      engagements: Object.fromEntries(
+        Object.entries(engagements).map(([type, config]) => {
+          const previewRuns = previewSchedules[type];
+          const runCount = config.runCount ?? previewRuns?.length ?? null;
+          const runIntervalMinutes = config.runIntervalMinutes ?? averageIntervalFromRuns(previewRuns);
+          const intervalParts = runIntervalMinutes ? minutesToIntervalParts(runIntervalMinutes) : null;
+
+          return [type, {
+            enabled: config.enabled,
+            quantity: config.quantity,
+            price: config.price,
+            service_id: config.serviceId,
+            time_limit_hours: config.timeLimitHours,
+            time_limit_custom_mode: config.timeLimitCustomMode ?? false,
+            variance_percent: config.variancePercent,
+            peak_hours_enabled: config.peakHoursEnabled,
+            run_count: runCount,
+            run_interval_minutes: runIntervalMinutes ?? null,
+            run_interval_value: intervalParts?.value ?? null,
+            run_interval_unit: intervalParts?.unit ?? null,
+          }];
+        })
+      ),
+      created_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase.functions.invoke('process-engagement-order', {
+      body: {
+        user_id: user.id,
+        bundle_id: bundle?.id,
+        link: trimmed,
+        base_quantity: baseQuantity,
+        total_price: totalPrice,
+        is_organic_mode: isOrganicMode,
+        config_snapshot: configSnapshot,
+        engagements: Object.entries(engagements)
+          .filter(([_, config]) => config.enabled)
+          .map(([type, config]) => {
+            let effectiveTimeLimit = config.timeLimitHours;
+            if (effectiveTimeLimit === -1) effectiveTimeLimit = 0;
+            const configuredIntervalMinutes = config.runIntervalMinutes ?? averageIntervalFromRuns(previewSchedules[type]);
+            const intervalParts = configuredIntervalMinutes ? minutesToIntervalParts(configuredIntervalMinutes) : null;
+            const scheduledRuns = previewSchedules[type]?.map((run, index) => {
+              const scheduledAt = configuredIntervalMinutes && index > 0
+                ? new Date(new Date(previewSchedules[type][0].scheduled_at).getTime() + configuredIntervalMinutes * index * 60000).toISOString()
+                : run.scheduled_at;
+              return { ...run, scheduled_at: scheduledAt, run_number: index + 1 };
+            });
+            return {
+              type,
+              quantity: config.quantity,
+              price: config.price,
+              service_id: config.serviceId,
+              time_limit_hours: effectiveTimeLimit,
+              variance_percent: config.variancePercent,
+              peak_hours_enabled: config.peakHoursEnabled,
+              run_count: config.runCount ?? scheduledRuns?.length ?? null,
+              run_interval_minutes: configuredIntervalMinutes ?? null,
+              drip_interval: intervalParts?.value ?? null,
+              drip_interval_unit: intervalParts?.unit ?? null,
+              scheduled_runs: scheduledRuns,
+            };
+          }),
+      },
+    });
+
+    if (error) {
+      let message = (error as any)?.message || 'Order failed';
+      const ctx = (error as any)?.context;
+      if (ctx && typeof ctx.text === 'function') {
+        try {
+          const text = await ctx.text();
+          if (text) {
+            try {
+              const parsed = JSON.parse(text);
+              message = parsed?.error || parsed?.message || text;
+            } catch { message = text; }
+          }
+        } catch { /* ignore */ }
+      }
+      throw new Error(message);
+    }
+    if ((data as any)?.error) throw new Error((data as any).error);
+    return data as { order_number: number };
+  }, [user, totalPrice, engagements, selectedBundle, baseQuantity, isOrganicMode, previewSchedules, platform, isAutoRatios, userSavedRatios]);
+
+  // Single-order mutation
+  const placeOrderMutation = useMutation({
+    mutationFn: async () => {
+      if (!wallet) throw new Error('Wallet not found. Please refresh the page.');
+      if (wallet.balance < totalPrice) {
+        throw new Error(
+          `Insufficient balance! You need ${formatPrice(totalPrice)} but only have ${formatPrice(wallet.balance)}. Please add funds.`
+        );
+      }
+      return submitEngagementOrder(link);
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "🚀 Order Placed!",
+        description: `Order #${data.order_number} created. ${formatPrice(totalPrice)} deducted.`,
+      });
+      // Immediately refresh wallet from auth context
+      refreshWallet();
+      queryClient.invalidateQueries({ queryKey: ['engagement-orders'] });
+      navigate('/engagement-orders');
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Order Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+      // Refresh wallet to show updated balance
+      refreshWallet();
+    },
+  });
+
+  // INSTANT RENDER - No loading state blocking UI
+  // Redirect happens via useEffect in DashboardLayout if not authenticated
+
+  if (!user && !authLoading) {
+    navigate('/auth');
+    return null;
+  }
+
+  // Check if user can afford the order
+  const canAfford = wallet && wallet.balance > 0 && wallet.balance >= totalPrice;
+
+  // Detect platform from link for validation
+  const detectPlatformFromLink = (raw: string) => isManualAdsPlatform(platform)
+    ? (isValidAdsLink(raw) ? platform : null)
+    : detectPlatformFromUrl(raw);
+
+  // Handle order button click - SUBSCRIPTION FIRST, then BALANCE
+  const handlePlaceOrder = () => {
+    if (repeatWarnings.length > 0) {
+      toast({
+        title: "Please adjust repeated order",
+        description: repeatWarnings[0],
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Wait for bundles to load
+    if (bundlesLoading) {
+      toast({
+        title: "Loading...",
+        description: "Please wait while services load.",
+      });
+      return;
+    }
+
+    // Mass Order mode: validate multi-link + open confirm dialog
+    if (orderMode === 'mass') {
+      if (parsedMassLinks.valid.length === 0) {
+        toast({
+          title: "No valid links",
+          description: "Paste at least one valid link that matches the selected platform.",
+          variant: "destructive",
+        });
+        return;
+      }
+    } else {
+      // Single mode: basic validation first
+      if (!link.trim()) {
+        toast({
+          title: "Link Required",
+          description: "Please enter a valid link.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Detect platform from link and validate it matches selected platform
+      const detectedPlatform = detectPlatformFromLink(link);
+      if (isManualAdsPlatform(platform) && !detectedPlatform) {
+        toast({ title: 'Invalid link', description: 'Enter a website link starting with https:// or http://.', variant: 'destructive' });
+        return;
+      }
+      if (detectedPlatform && detectedPlatform !== platform) {
+        toast({
+          title: "⚠️ Platform Mismatch",
+          description: `You selected ${platform.toUpperCase()}, but the link is for ${detectedPlatform.toUpperCase()}. Please select the correct platform.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    // NEW: Check if the selected platform has services configured
+    if (activeEngagementTypes.length === 0) {
+      toast({
+        title: "❌ Services Not Available",
+        description: `No services are configured for ${platform.toUpperCase()} yet. Please contact Admin.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // NEW: Double check that all enabled engagements have service IDs
+    const missingServiceEngagements = Object.entries(engagements)
+      .filter(([_, config]) => config.enabled && !config.serviceId)
+      .map(([type]) => type);
+
+    if (missingServiceEngagements.length > 0) {
+      toast({
+        title: "❌ Service Configuration Error",
+        description: `${missingServiceEngagements.join(', ')} services are not configured. This order cannot be sent to provider.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // NEW: Block orders where any enabled engagement type has zero price
+    const zeroPriceEngagements = Object.entries(engagements)
+      .filter(([_, config]) => config.enabled && config.price <= 0)
+      .map(([type]) => type);
+
+    if (zeroPriceEngagements.length > 0) {
+      toast({
+        title: "⚠️ Pricing Error",
+        description: `${zeroPriceEngagements.join(', ')} has $0.00 price. Service pricing may not be configured correctly. Please contact support.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const requiredTotal = orderMode === 'mass' ? massTotalCost : totalPrice;
+
+    // Admin gets free access - no subscription or balance required
+    if (!isAdmin) {
+      if (!wallet || wallet.balance <= 0) {
+        toast({
+          title: "🚫 No Balance",
+          description: "Your account has no balance. Please add funds first!",
+          variant: "destructive",
+        });
+        navigate('/wallet');
+        return;
+      }
+
+      if (wallet.balance < requiredTotal) {
+        toast({
+          title: "💰 Insufficient Balance",
+          description: `Your wallet has ${formatPrice(wallet?.balance || 0)}. This order requires ${formatPrice(requiredTotal)}. Please add funds!`,
+          variant: "destructive",
+        });
+        if (orderMode === 'single') navigate('/wallet');
+        return;
+      }
+    }
+
+    if (orderMode === 'mass') {
+      setMassConfirmOpen(true);
+      return;
+    }
+
+    placeOrderMutation.mutate();
+  };
+
+  // Sequential mass-order runner
+  const runMassOrders = async () => {
+    setMassConfirmOpen(false);
+    const links = parsedMassLinks.valid.map(v => v.link);
+    setMassProgress({ running: true, current: 0, total: links.length, success: 0, failed: [], done: false });
+    const failed: { link: string; error: string }[] = [];
+    let success = 0;
+    for (let i = 0; i < links.length; i++) {
+      setMassProgress(p => ({ ...p, current: i + 1 }));
+      try {
+        await submitEngagementOrder(links[i]);
+        success += 1;
+        setMassProgress(p => ({ ...p, success }));
+      } catch (e: any) {
+        failed.push({ link: links[i], error: e?.message || 'Failed' });
+        setMassProgress(p => ({ ...p, failed: [...failed] }));
+      }
+    }
+    setMassProgress(p => ({ ...p, running: false, done: true }));
+    refreshWallet();
+    queryClient.invalidateQueries({ queryKey: ['engagement-orders'] });
+    toast({
+      title: failed.length === 0 ? `✅ Placed ${success} orders` : `⚠️ ${success} placed, ${failed.length} failed`,
+      description: failed.length === 0 ? 'All orders created successfully.' : `${failed.length} link(s) failed. See details below.`,
+      variant: failed.length === 0 ? 'default' : 'destructive',
+    });
+  };
+
+
+  return (
+    <DashboardLayout>
+      <div className="engagement-order-page max-w-5xl mx-auto px-2 sm:px-6 lg:px-8 space-y-3 sm:space-y-6 pb-8">
+        {/* Platform Selector */}
+        <Card className="glass-card border-2 border-border">
+          <CardContent className="p-3 sm:p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-7 h-7 rounded-lg bg-foreground/10 flex items-center justify-center">
+                <Rocket className="h-3.5 w-3.5 text-foreground" />
+              </div>
+              <Label className="text-sm font-medium text-foreground">Select Platform</Label>
+              <span className="ml-auto text-xs text-muted-foreground font-medium">Pick one</span>
+            </div>
+            <PlatformSelector
+              selected={platform}
+              onSelect={setPlatform}
+              availablePlatforms={availablePlatforms}
+            />
+          </CardContent>
+        </Card>
+
+        <div className="flex min-w-0 items-center gap-2 px-1">
+          <Package className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+          <Label htmlFor="engagement-bundle" className="shrink-0 text-xs">Bundle</Label>
+          <Select value={selectedBundle?.id || ''} onValueChange={setSelectedBundleId} disabled={bundlesLoading || !bundleOptions.length}>
+            <SelectTrigger id="engagement-bundle" className="h-9 min-w-0 flex-1 rounded-lg text-xs [&>span]:min-w-0 [&>span]:truncate">
+              <SelectValue placeholder={bundlesLoading ? 'Loading bundles…' : 'Choose bundle'} />
+            </SelectTrigger>
+            <SelectContent className="max-w-[calc(100vw-2rem)]">
+              {bundleOptions.map((bundle, index) => (
+                <SelectItem key={bundle.id} value={bundle.id} className="text-xs [&>span:last-child]:whitespace-normal [&>span:last-child]:break-words">
+                  {bundle.name}{index === 0 ? ' · Primary' : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Repeat Order Banner */}
+        {(repeatSource || repeatError) && (
+          <Card className={cn(
+            "glass-card border-2",
+            repeatError || repeatWarnings.length > 0 ? "border-destructive/40 bg-destructive/5" : "border-primary/40 bg-primary/5"
+          )}>
+            <CardContent className="p-3 sm:p-4 flex items-center gap-3">
+              {repeatWarnings.length > 0 && !repeatError ? (
+                <AlertTriangle className="h-5 w-5 shrink-0 text-destructive" />
+              ) : (
+                <RefreshCw className={cn("h-5 w-5 shrink-0", repeatError ? "text-destructive" : "text-primary")} />
+              )}
+              <div className="flex-1 min-w-0">
+                {repeatError ? (
+                  <>
+                    <p className="text-sm font-semibold text-destructive">This service is no longer available.</p>
+                    <p className="text-xs text-muted-foreground">{repeatError}</p>
+                  </>
+                ) : repeatWarnings.length > 0 ? (
+                  <>
+                    <p className="text-sm font-semibold text-destructive">Original settings need review</p>
+                    <div className="mt-1 space-y-1">
+                      {repeatWarnings.map((warning, index) => (
+                        <p key={index} className="text-xs text-muted-foreground">{warning}</p>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-semibold text-foreground">Repeating Order #{repeatSource.order_number}</p>
+                    <p className="text-xs text-muted-foreground">Everything has been restored. Just replace your old link with a new one and click Place Order.</p>
+                  </>
+                )}
+              </div>
+              {repeatError && (
+                <Button size="sm" variant="outline" onClick={() => { setRepeatError(null); navigate('/engagement-order', { replace: true, state: null }); }}>
+                  Choose Similar Service
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Link Input */}
+        <Card className="glass-card border-2 border-border">
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4 sm:mb-5">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-foreground/10 flex items-center justify-center">
+                <LinkIcon className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
+              </div>
+              <Label className="text-base sm:text-lg font-medium text-foreground">Video/Post Link</Label>
+            </div>
+
+            {orderMode === 'single' ? (
+              <>
+                {(() => {
+                  const trimmed = link.trim();
+                  const detected = trimmed ? detectPlatformFromLink(trimmed) : null;
+                  const state: 'empty' | 'valid' | 'invalid' | 'wrong' =
+                    !trimmed ? 'empty'
+                    : !detected ? 'invalid'
+                    : detected !== platform ? 'wrong'
+                    : 'valid';
+                  const borderClass =
+                    state === 'valid' ? 'border-success focus:border-success'
+                    : state === 'empty' ? 'border-border focus:border-foreground'
+                    : 'border-destructive focus:border-destructive';
+                  return (
+                    <>
+                      <Input
+                        placeholder={isManualAdsPlatform(platform) ? 'https://example.com/...' : `https://${platform}.com/...`}
+                        value={link}
+                        onChange={(e) => setLink(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && state !== 'valid') e.preventDefault();
+                        }}
+                        aria-invalid={state === 'invalid' || state === 'wrong'}
+                        className={cn(
+                          "h-12 sm:h-14 text-base sm:text-lg rounded-xl border-2 bg-secondary text-foreground font-medium placeholder:text-muted-foreground transition-all",
+                          borderClass
+                        )}
+                      />
+                      {state === 'invalid' && (
+                        <p className="mt-2 text-xs text-destructive flex items-center gap-1.5">
+                          <span>⚠️</span> {isManualAdsPlatform(platform) ? 'Enter a valid website link starting with https:// or http://.' : `Please enter a valid ${platform.toUpperCase()} URL (e.g. https://${platform}.com/…). Random text, usernames or unsupported links are not allowed.`}
+                        </p>
+                      )}
+                      {state === 'wrong' && (
+                        <p className="mt-2 text-xs text-destructive flex items-center gap-1.5">
+                          <span>⚠️</span> This is a {detected?.toUpperCase()} link, but you selected {platform.toUpperCase()}. Only {platform.toUpperCase()} links are accepted for this service.
+                        </p>
+                      )}
+                      {state === 'valid' && (
+                        <p className="mt-2 text-xs text-success flex items-center gap-1.5">
+                          <span>✓</span> {isManualAdsPlatform(platform) ? 'Valid website link' : `Valid ${platform.toUpperCase()} link`}
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
+              </>
+            ) : (
+              <div className="space-y-3">
+                <Textarea
+                  placeholder={`Paste one link per line\nhttps://${platform}.com/abc\nhttps://${platform}.com/xyz`}
+                  value={massLinksText}
+                  onChange={(e) => setMassLinksText(e.target.value)}
+                  rows={6}
+                  className="min-h-[160px] max-h-[350px] overflow-y-auto text-sm rounded-xl border-2 border-border focus:border-foreground bg-secondary text-foreground font-mono placeholder:text-muted-foreground transition-all"
+                />
+                {/* Live counter */}
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                  <div className="p-2.5 sm:p-3 rounded-xl bg-secondary border border-border text-center">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Total Links</p>
+                    <p className="text-lg sm:text-xl font-bold text-foreground">{parsedMassLinks.all.length}</p>
+                  </div>
+                  <div className="p-2.5 sm:p-3 rounded-xl bg-success/10 border border-success/30 text-center">
+                    <p className="text-[10px] uppercase tracking-wider text-success">Valid</p>
+                    <p className="text-lg sm:text-xl font-bold text-success">{parsedMassLinks.valid.length}</p>
+                  </div>
+                  <div className="p-2.5 sm:p-3 rounded-xl bg-destructive/10 border border-destructive/30 text-center">
+                    <p className="text-[10px] uppercase tracking-wider text-destructive">Invalid</p>
+                    <p className="text-lg sm:text-xl font-bold text-destructive">{parsedMassLinks.invalid.length}</p>
+                  </div>
+                </div>
+                {parsedMassLinks.invalid.length > 0 && (
+                  <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-2.5 sm:p-3 max-h-40 overflow-auto">
+                    <p className="text-xs font-semibold text-destructive mb-1.5">Invalid links:</p>
+                    <ul className="space-y-1">
+                      {parsedMassLinks.invalid.slice(0, 20).map((it, i) => (
+                        <li key={i} className="text-xs text-muted-foreground flex items-center gap-2">
+                          <span className="text-destructive">✗</span>
+                          <span className="truncate flex-1">{it.link}</span>
+                          <span className="text-destructive shrink-0">{it.reason}</span>
+                        </li>
+                      ))}
+                      {parsedMassLinks.invalid.length > 20 && (
+                        <li className="text-xs text-muted-foreground italic">…and {parsedMassLinks.invalid.length - 20} more</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+                {parsedMassLinks.valid.length > 0 && totalPrice > 0 && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Total for {parsedMassLinks.valid.length} order{parsedMassLinks.valid.length === 1 ? '' : 's'}</p>
+                      <p className="text-lg font-bold text-foreground">{formatPrice(massTotalCost)}</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground text-right">
+                      {formatPrice(totalPrice)} × {parsedMassLinks.valid.length}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+
+        {/* Base Quantity */}
+        <Card className="glass-card border-2 border-border">
+          <CardContent className="p-4 sm:p-6">
+            <QuantitySelector
+              value={baseQuantity}
+              onChange={setBaseQuantity}
+              min={Math.max(1, engagements?.views?.minQuantity ?? 100)}
+              max={Math.max(1000000, engagements?.views?.maxQuantity ?? 1000000)}
+            />
+            {(engagements?.views?.minQuantity ?? 0) > 0 && (
+              <p className="text-[11px] text-muted-foreground mt-2">
+                Provider minimum {engagements.views.minQuantity.toLocaleString()} views — isse kam order provider accept nahi karega.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Engagement Types with Per-Type Settings */}
+        <div className="space-y-4 sm:space-y-5">
+          <div className="flex items-center justify-between px-1 gap-2">
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-xl font-semibold text-foreground">Engagement Breakdown</h2>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 sm:mt-1 hidden sm:block">
+                Customize organic settings per type
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs sm:text-sm bg-foreground text-background px-3 sm:px-4 py-1.5 sm:py-2 rounded-full font-bold">
+                {bundlesLoading ? (
+                  <span className="flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" /> ...</span>
+                ) : (
+                  `${Object.values(engagements).filter(e => e.enabled).length} active`
+                )}
+              </span>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:gap-4">
+            {activeEngagementTypes.map(type => (
+              engagements[type] && (
+                <EngagementTypeCard
+                  key={type}
+                  type={type}
+                  config={engagements[type]}
+                  baseQuantity={baseQuantity}
+                  onChange={(config) => handleEngagementChange(type, config)}
+                  minQuantity={engagements[type]?.minQuantity}
+                  customCurvePoints={drawModeState.isEnabled ? drawModeState.points[type] : undefined}
+                  pricePerK={servicePrices[type]?.pricePerK}
+                />
+              )
+            ))}
+          </div>
+        </div>
+
+        {/* Live Growth Chart - Real-time visualization (shown when not drawing) */}
+        {!drawModeState.isEnabled && activeEngagementTypes.length > 0 && (
+          <LiveGrowthChart
+            engagements={engagements as Record<EngagementType, EngagementConfig>}
+            refreshKey={previewRefreshKey}
+            onRefresh={() => setPreviewRefreshKey(k => k + 1)}
+            platform={platform as 'instagram' | 'tiktok' | 'youtube' | 'twitter' | 'facebook'}
+          />
+        )}
+
+        {/* Delivery Timeline Preview - Detailed schedule */}
+        {activeEngagementTypes.length > 0 && (
+          <DeliveryPreview
+            engagements={engagements as Record<EngagementType, EngagementConfig>}
+            refreshKey={previewRefreshKey}
+            platform={platform as 'instagram' | 'tiktok' | 'youtube' | 'twitter' | 'facebook'}
+            customCurvePoints={drawModeState.isEnabled ? drawModeState.points : undefined}
+            onScheduleChange={handleScheduleChange}
+          />
+        )}
+
+        {/* Order Summary — clean bar */}
+        <Card className="border border-border/70 bg-card shadow-sm overflow-hidden">
+          <CardContent className="p-3 sm:p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-4">
+              {/* Price + meta */}
+              <div className="flex items-baseline gap-2 min-w-0">
+                <span className="text-xl sm:text-2xl font-bold text-primary shrink-0">{formatPrice(totalPrice)}</span>
+                <span className="text-xs text-muted-foreground truncate">
+                  {totalEngagements.toLocaleString()} engagements · {Object.values(engagements).filter(e => e.enabled).length} types
+                  {servicePrices.views?.pricePerK ? ` · Views rate ${formatPrice(servicePrices.views.pricePerK, { decimals: 2 })}/1K` : ''}
+                </span>
+              </div>
+
+              {/* Divider on desktop */}
+              <div className="hidden sm:block w-px h-6 bg-border shrink-0" />
+
+              {/* Balance */}
+              <div className="flex items-center gap-1.5 text-xs sm:text-sm text-muted-foreground shrink-0">
+                <Wallet className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                <span className="truncate">{formatPrice(wallet?.balance || 0)}</span>
+                {!canAfford && totalPrice > 0 && (
+                  <span className="text-destructive font-medium ml-0.5">Low</span>
+                )}
+              </div>
+
+              {/* Spacer pushes button right on desktop */}
+              <div className="hidden sm:block flex-1" />
+
+              {/* CTA */}
+              {(() => {
+                const singleLinkValid =
+                  orderMode === 'single' &&
+                  link.trim().length > 0 &&
+                  detectPlatformFromUrl(link.trim()) === platform;
+                const massLinksValid =
+                  orderMode === 'mass' &&
+                  parsedMassLinks.valid.length > 0;
+                const canShowButton = singleLinkValid || massLinksValid;
+
+                return (
+                  <Button
+                    size="default"
+                    onClick={handlePlaceOrder}
+                    disabled={!canShowButton || placeOrderMutation.isPending || bundlesLoading}
+                    className="h-10 sm:h-11 px-5 text-sm font-semibold rounded-lg bg-primary hover:bg-primary/90 transition-colors"
+                  >
+                    {placeOrderMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                        Processing
+                      </>
+                    ) : bundlesLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                        Loading
+                      </>
+                    ) : (
+                      <>
+                        <Rocket className="h-4 w-4 mr-1.5" />
+                        Place Order
+                      </>
+                    )}
+                  </Button>
+                );
+              })()}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Mass Order Confirmation */}
+      <AlertDialog open={massConfirmOpen} onOpenChange={setMassConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mass Order Summary</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 pt-2 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">Total Links</span><strong className="text-foreground">{parsedMassLinks.all.length}</strong></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Valid Links</span><strong className="text-success">{parsedMassLinks.valid.length}</strong></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Invalid Links</span><strong className="text-destructive">{parsedMassLinks.invalid.length}</strong></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Price Per Order</span><strong className="text-foreground">{formatPrice(totalPrice)}</strong></div>
+                <div className="flex justify-between pt-2 border-t border-border"><span className="font-semibold">Total Amount</span><strong className="text-lg text-primary">{formatPrice(massTotalCost)}</strong></div>
+                <p className="text-xs text-muted-foreground pt-1">Each valid link becomes a separate order with its own tracking.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={runMassOrders}>Place {parsedMassLinks.valid.length} Orders</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Mass Order Progress Overlay */}
+      {(massProgress.running || massProgress.done) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+          <Card className="w-full max-w-md glass-card border-2 border-primary/40">
+            <CardContent className="p-5 space-y-4">
+              <div className="flex items-center gap-3">
+                {massProgress.running ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                ) : (
+                  <div className="h-5 w-5 rounded-full bg-success flex items-center justify-center text-white text-xs">✓</div>
+                )}
+                <div>
+                  <h3 className="font-bold text-foreground">
+                    {massProgress.running ? 'Creating Orders...' : 'Done'}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Order {massProgress.current} / {massProgress.total}
+                  </p>
+                </div>
+              </div>
+              <Progress value={(massProgress.current / Math.max(1, massProgress.total)) * 100} />
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="p-2 rounded-lg bg-success/10 border border-success/30 text-center">
+                  <p className="text-xs text-muted-foreground">Success</p>
+                  <p className="font-bold text-success">{massProgress.success}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-destructive/10 border border-destructive/30 text-center">
+                  <p className="text-xs text-muted-foreground">Failed</p>
+                  <p className="font-bold text-destructive">{massProgress.failed.length}</p>
+                </div>
+              </div>
+              {massProgress.failed.length > 0 && (
+                <div className="max-h-32 overflow-auto rounded-lg border border-destructive/30 bg-destructive/5 p-2">
+                  <p className="text-xs font-semibold text-destructive mb-1">Failed:</p>
+                  <ul className="space-y-1">
+                    {massProgress.failed.map((f, i) => (
+                      <li key={i} className="text-[11px] text-muted-foreground">
+                        <span className="truncate block">{f.link}</span>
+                        <span className="text-destructive">{f.error}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {massProgress.done && (
+                <div className="flex gap-2 justify-end pt-1">
+                  <Button
+                    variant="outline"
+                    onClick={() => setMassProgress(p => ({ ...p, done: false, running: false }))}
+                  >
+                    Close
+                  </Button>
+                  <Button onClick={() => navigate('/engagement-orders')}>
+                    View Orders
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </DashboardLayout>
+  );
+}

@@ -1,0 +1,270 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Hide number input spinners globally */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+@layer base {
+  :root {
+    /* White and sky-blue shared application theme. */
+    --background: 0 0% 100%;
+    --foreground: 218 35% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 218 35% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 218 35% 12%;
+
+    --primary: 210 88% 38%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 75% 96%;
+    --secondary-foreground: 218 35% 12%;
+
+    --muted: 210 75% 95%;
+    --muted-foreground: 215 18% 33%;
+
+    --accent: 210 88% 38%;
+    --accent-foreground: 0 0% 100%;
+
+    --success: 158 72% 32%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 44 100% 58%;
+    --warning-foreground: 232 65% 11%;
+
+    --destructive: 354 90% 58%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 75% 88%;
+    --input: 210 75% 88%;
+    --ring: 210 88% 38%;
+
+    --radius: 0.5rem;
+
+    /* bold brand extras */
+    --electric: 210 88% 42%;
+    --hot: 210 88% 40%;
+    --sun: 202 85% 48%;
+    --mint: 210 88% 48%;
+
+    --gradient-hero: linear-gradient(135deg, hsl(218 35% 12%), hsl(210 88% 40%));
+    --gradient-hot: linear-gradient(135deg, hsl(210 88% 40%), hsl(210 88% 40%));
+    --gradient-sun: linear-gradient(135deg, hsl(202 85% 48%), hsl(210 88% 44%));
+
+    --shadow-soft: 0 6px 24px hsl(210 88% 38% / 0.10);
+    --shadow-bold: 0 18px 40px -12px hsl(210 88% 38% / 0.45);
+    --shadow-glow: 0 0 36px hsl(210 88% 46% / 0.28);
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 218 35% 12%;
+    --sidebar-primary: 210 88% 38%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 75% 96%;
+    --sidebar-accent-foreground: 215 35% 14%;
+    --sidebar-border: 210 75% 88%;
+    --sidebar-ring: 210 88% 38%;
+  }
+}
+
+
+html {
+  font-size: 16px;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'DM Sans', system-ui, sans-serif;
+    font-weight: 800;
+    letter-spacing: 0;
+    line-height: 1.02;
+    color: hsl(var(--foreground));
+    text-shadow: none;
+  }
+
+  h1 { font-weight: 800; letter-spacing: 0; }
+
+  label, .label {
+    font-family: 'DM Sans', system-ui, sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    @apply text-muted-foreground text-[11px];
+  }
+
+  ::selection {
+    background: hsl(var(--sun) / 0.55);
+    color: hsl(var(--foreground));
+  }
+
+
+}
+
+@layer components {
+
+  .glass-card {
+    @apply relative overflow-hidden rounded-[1.25rem] border-2 bg-card;
+    border-color: hsl(var(--foreground) / 0.08);
+    box-shadow: 0 10px 28px -14px hsl(var(--electric) / 0.35);
+  }
+
+  .three-d-card {
+    @apply glass-card;
+  }
+
+  .glass-premium {
+    @apply glass-card;
+  }
+
+  .glass-panel {
+    @apply rounded-[1.25rem] bg-card border-2;
+    border-color: hsl(var(--foreground) / 0.08);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .gradient-text {
+    @apply bg-clip-text text-transparent font-extrabold;
+    background-image: linear-gradient(120deg, hsl(var(--electric)), hsl(var(--hot)) 55%, hsl(var(--sun)));
+  }
+
+  /* ════ BOLD BLOCKS ════ */
+  .block-electric {
+    @apply relative overflow-hidden text-white;
+    background: var(--gradient-hero);
+  }
+
+  .block-hot {
+    @apply relative overflow-hidden text-white;
+    background: var(--gradient-hot);
+  }
+
+  .block-sun {
+    @apply relative overflow-hidden;
+    background: var(--gradient-sun);
+    color: hsl(var(--foreground));
+  }
+
+  .stat-huge {
+    @apply font-extrabold leading-none tracking-tighter text-5xl md:text-7xl;
+    font-family: 'DM Sans', system-ui, sans-serif;
+  }
+
+  .eyebrow {
+    @apply inline-flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[0.18em];
+  }
+
+  /* ════ BUTTONS ════ */
+  .btn-3d {
+    @apply relative overflow-hidden font-extrabold rounded-full flex items-center justify-center transition-all duration-200 text-white;
+    background: var(--gradient-hero);
+    box-shadow: var(--shadow-bold);
+  }
+
+  .btn-3d:hover {
+    transform: translateY(-2px);
+    background: var(--gradient-hot);
+    box-shadow: 0 22px 46px -14px hsl(var(--hot) / 0.5);
+  }
+
+  .btn-3d:active {
+    transform: translateY(0);
+  }
+
+
+  .btn-glass {
+    @apply relative overflow-hidden font-extrabold rounded-full bg-secondary text-foreground border-2 border-foreground/10 transition-all duration-200;
+  }
+
+  .btn-glass:hover {
+    @apply bg-muted border-primary/40;
+  }
+
+  /* ════ NAVIGATION ════ */
+  .nav-link {
+    @apply flex items-center gap-3 px-4 py-3 rounded-full text-muted-foreground font-bold transition-colors;
+  }
+
+  .nav-link-active {
+    @apply text-primary-foreground bg-primary border-2 border-primary;
+  }
+
+
+  /* ════ INPUTS ════ */
+  .input-3d {
+    @apply bg-secondary border-border rounded-xl font-medium transition-all text-foreground;
+  }
+
+  .input-3d:focus {
+    @apply border-primary ring-2 ring-primary/20 outline-none;
+  }
+
+  .glow-neon {
+    box-shadow: 0 0 16px hsl(var(--primary) / 0.18);
+  }
+
+
+  /* Chrome autofill fix */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 100px hsl(30 20% 98%) inset !important;
+    -webkit-text-fill-color: hsl(240 20% 12%) !important;
+    transition: background-color 5000s ease-in-out 0s;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary) / 0.15) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.2);
+    border-radius: 10px;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite !important;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

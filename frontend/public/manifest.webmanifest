@@ -1,0 +1,45 @@
+{
+    "name": "ZoloSMM — Noir Edition",
+    "short_name": "ZoloSMM",
+    "description": "AI-powered growth atelier — real engagement, noir aesthetic.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#0a0a0a",
+    "theme_color": "#0a0a0a",
+    "orientation": "portrait",
+    "icons": [
+        {
+            "src": "/icon-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/icon-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "/icon-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "categories": [
+        "business",
+        "social",
+        "productivity"
+    ],
+    "shortcuts": [
+        {
+            "name": "New Order",
+            "url": "/new-order",
+            "icons": [{ "src": "/icon-192x192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Wallet",
+            "url": "/wallet",
+            "icons": [{ "src": "/icon-192x192.png", "sizes": "192x192" }]
+        }
+    ]
+}
