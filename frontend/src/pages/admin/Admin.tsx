@@ -193,6 +193,12 @@ export default function Admin() {
         {/* Queue Health Widget */}
         <QueueHealthWidget />
 
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Button variant="outline" asChild className="h-auto justify-start rounded-lg p-4"><Link to="/admin/deposit-bonus">Deposit Bonus Management</Link></Button>
+          <Button variant="outline" asChild className="h-auto justify-start rounded-lg p-4"><Link to="/admin/referrals">Referral Management</Link></Button>
+          <Button variant="outline" asChild className="h-auto justify-start rounded-lg p-4"><Link to="/admin/reviews">Review Management</Link></Button>
+        </div>
+
         {/* Quick Access Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 

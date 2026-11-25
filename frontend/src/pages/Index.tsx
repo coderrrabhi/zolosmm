@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 
 import { PageMeta } from '@/components/seo/PageMeta';
+import { PublicReviews } from '@/components/reviews/PublicReviews';
 import './zolo-home.css';
 
 const navLinks = [
@@ -243,6 +244,8 @@ const Index = () => {
           ))}
         </div>
       </section>
+
+      <PublicReviews />
 
       <section className="zh-wrap zh-cta z3-raised">
         <Zap size={26} />

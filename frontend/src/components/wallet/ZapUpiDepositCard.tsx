@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { DepositRewardPreview } from '@/components/rewards/DepositRewardPreview';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Loader2, Zap, IndianRupee, ArrowUpRight } from 'lucide-react';
@@ -54,6 +55,7 @@ export default function ZapUpiDepositCard() {
     >
       <AmountBlock value={amount} onChange={setAmount} min={50} max={100000} accent={ACCENT} id="zap-amount" />
       <ChipRow values={QUICK} value={amount} onPick={setAmount} accent={ACCENT} />
+      <DepositRewardPreview amount={amount} />
       <PayCta
         accent={ACCENT}
         onClick={handlePay}

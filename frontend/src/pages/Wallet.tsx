@@ -5,6 +5,8 @@ import { useTransactions, useWalletSummary, type TransactionFilter } from '@/hoo
 import { useCurrency } from '@/hooks/useCurrency';
 import ZapUpiDepositCard from '@/components/wallet/ZapUpiDepositCard';
 import OxaPayAddFunds from '@/components/wallet/OxaPayAddFunds';
+import { RecentBonusBanner } from '@/components/rewards/RecentBonusBanner';
+import { BonusHistoryCard } from '@/components/rewards/BonusHistoryCard';
 import ManualFundCard from '@/components/wallet/ManualFundCard';
 import {
   WalletDateFilter,
@@ -460,6 +462,7 @@ export default function Wallet() {
           <div className="grid grid-cols-1 gap-5 animate-in fade-in slide-in-from-bottom-2 duration-300" key={payMethod}>
             {payMethod === 'upi' && <ZapUpiDepositCard />}
             {payMethod === 'crypto' && <OxaPayAddFunds />}
+            <div className="mt-4 space-y-3"><RecentBonusBanner /><BonusHistoryCard /></div>
             {payMethod === 'manual' && <ManualFundCard />}
           </div>
         </div>
@@ -569,7 +572,7 @@ export default function Wallet() {
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-bold" style={{ color: getAmountColor(tx.type) }}>
-                    {tx.type === 'order' || tx.type === 'order_payment' ? '-' : '+'}
+                    {tx.type === 'order' || tx.type === 'order_payment' || Number(tx.displayAmount) < 0 ? '-' : '+'}
                     {formatPrice(Math.abs(Number(tx.displayAmount || 0)))}
                   </p>
                   {tx.displayBalanceAfter != null && (

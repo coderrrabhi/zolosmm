@@ -24,7 +24,7 @@ const signupSchema = z.object({
 });
 
 export default function Auth() {
-  const [isLogin, setIsLogin] = useState(true);
+  const [isLogin, setIsLogin] = useState(() => new URLSearchParams(window.location.search).get('mode') !== 'signup');
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [showVerifyEmail, setShowVerifyEmail] = useState(false);
   const [email, setEmail] = useState('');

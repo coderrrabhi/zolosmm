@@ -1,4 +1,5 @@
 import { useState, useEffect, createContext, useContext, ReactNode, useCallback } from 'react';
+import { claimPendingReferral } from '@/components/rewards/ReferralCapture';
 import { supabase } from '@/integrations/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 import { toast } from 'sonner';
@@ -33,6 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchUserData = useCallback(async (userId: string, allowBootstrap = true) => {
     try {
+      if (allowBootstrap) void claimPendingReferral();
       const [profileResult, walletResult, roleResult] = await Promise.all([
         supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
         supabase.from('wallets').select('*').eq('user_id', userId).maybeSingle(),
@@ -48,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           p_full_name: null,
         });
         if (!bootstrapError) {
+          await claimPendingReferral();
           await fetchUserData(userId, false);
           return;
         }
@@ -261,6 +264,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (bootstrapError) {
         console.error('Account bootstrap failed:', bootstrapError);
       }
+      await claimPendingReferral();
 
       console.log('--- useAuth: signUp success ---');
       return { error: null };

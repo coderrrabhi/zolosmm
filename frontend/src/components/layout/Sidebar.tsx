@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Wallet, Settings, LifeBuoy, Shield, LogOut, Rocket, Sparkles, X, Code2, Send, Layers, Megaphone, Bookmark, ShoppingCart, History } from 'lucide-react';
+import { LayoutDashboard, Wallet, Settings, LifeBuoy, Shield, LogOut, Rocket, Sparkles, X, Code2, Send, Layers, Megaphone, Bookmark, ShoppingCart, History, Gift, MessageSquareQuote } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useCurrency } from '@/hooks/useCurrency';
 import { cn } from '@/lib/utils';
@@ -18,6 +18,8 @@ const userNavItems = [
   { icon: Sparkles, label: 'Engagement Orders', path: '/engagement-orders' },
   
   { icon: Wallet, label: 'Wallet', path: '/wallet' },
+  { icon: Gift, label: 'My Referrals', path: '/referrals' },
+  { icon: MessageSquareQuote, label: 'Reviews', path: '/reviews' },
   { icon: Code2, label: 'API Access', path: '/api-access' },
   { icon: LifeBuoy, label: 'Support', path: '/support' },
   { icon: Settings, label: 'Settings', path: '/settings' },

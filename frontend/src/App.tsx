@@ -46,6 +46,12 @@ import AdminAuditLog from "./pages/admin/AdminAuditLog";
 import AdminPopupAd from "./pages/admin/AdminPopupAd";
 import AdminTopupPlan from "./pages/admin/AdminTopupPlan";
 import AdminChat from "./pages/admin/AdminChat";
+import AdminDepositBonus from "./pages/admin/AdminDepositBonus";
+import AdminReferrals from "./pages/admin/AdminReferrals";
+import AdminReviews from "./pages/admin/AdminReviews";
+import Referrals from "./pages/Referrals";
+import Reviews from "./pages/Reviews";
+import { ReferralCapture, RegisterRedirect } from "@/components/rewards/ReferralCapture";
 
 
 
@@ -108,11 +114,15 @@ const App = () => {
             <AppErrorBoundary>
               <BrowserRouter>
                 <ScrollToTop />
+                <ReferralCapture />
                 <GlobalSubscriptionGuard>
                   <Routes>
                     {/* User pages */}
                     <Route path="/" element={<Index />} />
                     <Route path="/auth" element={<Auth />} />
+                    <Route path="/register" element={<RegisterRedirect />} />
+                    <Route path="/referrals" element={<Referrals />} />
+                    <Route path="/reviews" element={<Reviews />} />
                     <Route path="/dashboard" element={<Dashboard />} />
                     <Route path="/orders" element={<Orders />} />
                     <Route path="/single-order" element={<SingleOrder />} />
@@ -142,6 +152,9 @@ const App = () => {
                     <Route path="/admin/service-provider-mapping" element={<AdminGuard><AdminServiceProviderMapping /></AdminGuard>} />
                     <Route path="/admin/audit-log" element={<AdminGuard><AdminAuditLog /></AdminGuard>} />
                     <Route path="/admin/popup-ad" element={<AdminGuard><AdminPopupAd /></AdminGuard>} />
+                    <Route path="/admin/deposit-bonus" element={<AdminGuard><AdminDepositBonus /></AdminGuard>} />
+                    <Route path="/admin/referrals" element={<AdminGuard><AdminReferrals /></AdminGuard>} />
+                    <Route path="/admin/reviews" element={<AdminGuard><AdminReviews /></AdminGuard>} />
                     <Route path="/admin/topup-plan" element={<AdminGuard><AdminTopupPlan /></AdminGuard>} />
                     
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DepositRewardPreview } from '@/components/rewards/DepositRewardPreview';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Bitcoin } from 'lucide-react';
@@ -50,6 +51,7 @@ export default function OxaPayAddFunds() {
     >
       <AmountBlock value={amount} onChange={setAmount} min={90} max={540000} accent={ACCENT} id="oxapay-amount" />
       <ChipRow values={QUICK} value={amount} onPick={setAmount} accent={ACCENT} />
+      <DepositRewardPreview amount={amount} />
       <PayCta
         accent={ACCENT}
         onClick={handlePay}
