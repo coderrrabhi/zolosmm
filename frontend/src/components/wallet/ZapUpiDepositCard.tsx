@@ -115,23 +115,15 @@ export function SimpleCard({
 }
 
 export function AmountBlock({
-  id, value, onChange, min, max, accent,
+  id, value, onChange, min, max,
 }: { id: string; value: string; onChange: (v: string) => void; min: number; max: number; accent: string }) {
-  const [focused, setFocused] = useState(false);
   return (
-    <div
-      className="rounded-xl px-4 py-3.5 transition-all"
-      style={{
-        background: '#FAFBFC',
-        border: `1px solid ${focused ? accent : '#EEF0F4'}`,
-        boxShadow: focused ? `0 0 0 4px ${accent}18` : 'none',
-      }}
-    >
-      <label htmlFor={id} className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+    <div className="zolo-wallet-amount">
+      <label htmlFor={id} className="zolo-wallet-amount-label">
         Amount
       </label>
-      <div className="flex items-center gap-2 mt-1">
-        <IndianRupee className="h-5 w-5 text-slate-500" strokeWidth={2.5} />
+      <div className="zolo-wallet-amount-control">
+        <IndianRupee className="zolo-wallet-amount-currency" strokeWidth={2.5} aria-hidden="true" />
         <input
           id={id}
           type="number"
@@ -140,15 +132,14 @@ export function AmountBlock({
           max={max}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          aria-describedby={`${id}-range`}
           placeholder="100"
-          className="flex-1 bg-transparent border-0 outline-none text-slate-900 text-[26px] font-semibold tracking-tight placeholder:text-slate-400"
+          className="zolo-wallet-amount-input"
         />
-        <span className="text-[10.5px] font-medium text-slate-500 tracking-wider">
-          ₹{min}–{max >= 100000 ? `${Math.round(max / 1000)}k` : max.toLocaleString('en-IN')}
-        </span>
       </div>
+      <span id={`${id}-range`} className="zolo-wallet-amount-range">
+        ₹{min.toLocaleString('en-IN')} – ₹{max.toLocaleString('en-IN')}
+      </span>
     </div>
   );
 }

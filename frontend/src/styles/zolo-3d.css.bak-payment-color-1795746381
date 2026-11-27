@@ -1,0 +1,129 @@
+/* ZoloSMM soft-3D (raised) theme — white / sky blue, DM Sans.
+   Loaded after every other stylesheet so it applies to home, member and admin pages. */
+:root {
+  --z3-bg: 210 45% 95%;
+  --z3-surface: 210 50% 97%;
+  --z3-edge: 210 55% 86%;
+  --z3-ink: 218 35% 14%;
+  --z3-sky: 199 92% 48%;
+  --z3-blue: 210 88% 42%;
+  --z3-dark-shadow: 213 40% 66%;
+  --z3-grad: linear-gradient(135deg, hsl(199 92% 50%), hsl(210 88% 42%));
+  --z3-raise: 8px 8px 22px hsl(var(--z3-dark-shadow) / 0.32), -8px -8px 22px hsl(0 0% 100% / 0.95);
+  --z3-raise-sm: 4px 4px 12px hsl(var(--z3-dark-shadow) / 0.30), -4px -4px 12px hsl(0 0% 100% / 0.95);
+  --z3-press: inset 3px 3px 8px hsl(var(--z3-dark-shadow) / 0.30), inset -3px -3px 8px hsl(0 0% 100% / 0.95);
+  --z3-btn: 0 12px 24px -10px hsl(var(--z3-blue) / 0.65), inset 0 1px 0 hsl(0 0% 100% / 0.35);
+  --background: 210 45% 95%;
+  --card: 210 50% 97%;
+  --border: 210 55% 86%;
+}
+@media (max-width: 640px) {
+  :root {
+    --z3-raise: 5px 5px 14px hsl(var(--z3-dark-shadow) / 0.30), -5px -5px 14px hsl(0 0% 100% / 0.95);
+    --z3-raise-sm: 3px 3px 8px hsl(var(--z3-dark-shadow) / 0.28), -3px -3px 8px hsl(0 0% 100% / 0.95);
+  }
+}
+
+body { background: hsl(var(--z3-bg)); font-family: 'DM Sans', system-ui, sans-serif; }
+
+/* Raised surfaces */
+.z3-raised,
+.glass-card, .three-d-card, .glass-premium, .glass-panel {
+  background: hsl(var(--z3-surface)) !important;
+  border: 1.5px solid hsl(var(--z3-edge)) !important;
+  box-shadow: var(--z3-raise) !important;
+}
+.z3-raised-sm { background: hsl(var(--z3-surface)); border: 1.5px solid hsl(var(--z3-edge)); box-shadow: var(--z3-raise-sm); }
+.z3-pressed { background: hsl(var(--z3-bg)); box-shadow: var(--z3-press); border: 1px solid hsl(var(--z3-edge) / 0.7); }
+
+/* Buttons */
+.z3-btn, .btn-3d, .btn-gradient {
+  background: var(--z3-grad) !important; color: hsl(0 0% 100%) !important;
+  box-shadow: var(--z3-btn) !important; transition: transform .18s ease, box-shadow .18s ease;
+}
+.z3-btn:hover, .btn-3d:hover, .btn-gradient:hover { transform: translateY(-2px); box-shadow: 0 16px 30px -10px hsl(var(--z3-blue) / 0.7), inset 0 1px 0 hsl(0 0% 100% / 0.35) !important; }
+.z3-btn:active, .btn-3d:active, .btn-gradient:active { transform: translateY(1px); }
+.z3-btn-soft, .btn-glass {
+  background: hsl(var(--z3-surface)) !important; color: hsl(var(--z3-ink)) !important;
+  border: 1.5px solid hsl(var(--z3-edge)) !important; box-shadow: var(--z3-raise-sm) !important;
+}
+.z3-btn-soft:active, .btn-glass:active { box-shadow: var(--z3-press) !important; }
+
+/* Inputs look pressed-in */
+.input-3d,
+html body .member-page :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, [role="combobox"]) {
+  background-color: hsl(var(--z3-bg)) !important;
+  box-shadow: var(--z3-press) !important;
+  border-color: hsl(var(--z3-edge)) !important;
+}
+html body .member-page :is(input, textarea, [role="combobox"]):focus {
+  border-color: hsl(var(--z3-sky)) !important;
+  box-shadow: var(--z3-press), 0 0 0 3px hsl(var(--z3-sky) / 0.18) !important;
+}
+
+/* Member + admin pages */
+html body .member-shell { background: hsl(var(--z3-bg)); --member-soft: 210 45% 95%; --background: 210 45% 95%; --card: 210 50% 97%; }
+html body .member-page :is(.glass-card, .glass-panel, .three-d-card, [class*="bg-card"]) {
+  background-color: hsl(var(--z3-surface)) !important;
+  border: 1.5px solid hsl(var(--z3-edge)) !important;
+  box-shadow: var(--z3-raise) !important;
+}
+html body .member-page > div > div:first-child:is(.glass-card, [class*="rounded-2xl"], [class*="rounded-3xl"]) { background-color: hsl(var(--z3-surface)) !important; }
+html body .member-page :is(button, a)[class*="bg-gradient"]:not([role="combobox"]),
+html body .member-page button[class*="bg-primary"]:not([role="tab"]):not([role="switch"]):not([role="combobox"]) {
+  background: var(--z3-grad) !important; box-shadow: var(--z3-btn) !important;
+}
+html body .member-page [role="tablist"] { background: hsl(var(--z3-bg)) !important; box-shadow: var(--z3-press); }
+html body .member-page [role="tab"][data-state="active"] { background: hsl(var(--z3-surface)) !important; box-shadow: var(--z3-raise-sm) !important; }
+html body .member-page table { background: transparent; }
+html body .member-sidebar { background: hsl(var(--z3-surface)) !important; box-shadow: 6px 0 22px hsl(var(--z3-dark-shadow) / 0.18) !important; border-right: 1.5px solid hsl(var(--z3-edge)) !important; }
+html body .member-bottom-nav { background: hsl(var(--z3-surface)) !important; box-shadow: 0 -6px 20px hsl(var(--z3-dark-shadow) / 0.22) !important; }
+
+/* Dialogs / popovers float */
+[role="dialog"], [data-radix-popper-content-wrapper] > * { box-shadow: 0 30px 60px -20px hsl(var(--z3-dark-shadow) / 0.55) !important; }
+
+.z3-grad-text { background: var(--z3-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* Dropdown pickers stay light and readable */
+html body .member-page button[role="combobox"],
+html body .member-page button[role="combobox"][class*="bg-gradient"],
+html body .member-page button[role="combobox"][class*="bg-primary"] {
+  background: hsl(var(--z3-surface)) !important;
+  color: hsl(var(--z3-ink)) !important;
+  border: 1.5px solid hsl(var(--z3-edge)) !important;
+  box-shadow: var(--z3-raise-sm) !important;
+}
+html body button.z3-btn[role="combobox"], html body [role="combobox"].z3-btn {
+  background: hsl(var(--z3-surface)) !important; color: hsl(var(--z3-ink)) !important;
+  border: 1.5px solid hsl(var(--z3-edge)) !important; box-shadow: var(--z3-raise-sm) !important;
+}
+
+/* Delivery disclosure stays readable instead of inheriting the action gradient. */
+html body .member-page .engagement-order-page button.group[aria-expanded][class~="bg-primary/5"] {
+  background: hsl(var(--z3-surface)) !important;
+  color: hsl(var(--z3-ink)) !important;
+  border: 2px solid hsl(var(--primary)) !important;
+  box-shadow: none !important;
+  min-height: 56px;
+}
+html body .member-page .engagement-order-page button.group[aria-expanded][class~="bg-primary/5"] :is(span, svg) {
+  color: inherit !important;
+}
+html body .member-page .engagement-order-page button.group[aria-expanded][class~="bg-primary/5"] > span:last-child {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground)) !important;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+html body .member-page .engagement-order-page button.group[aria-expanded][class~="bg-primary/5"] > span:first-child > span:last-child > span:last-child {
+  font-size: 12px;
+}
+html body .member-page .engagement-order-page button.group[aria-expanded][class~="bg-primary/5"]:is(:hover, [data-state="open"]) {
+  background: hsl(var(--z3-bg)) !important;
+}
+html body .member-page .engagement-order-page button.group[aria-expanded][class~="bg-primary/5"]:focus-visible {
+  outline: 3px solid hsl(var(--primary));
+  outline-offset: 3px;
+}
