@@ -106,9 +106,9 @@ html body button.z3-btn[role="combobox"], html body [role="combobox"].z3-btn {
 
 /* Delivery disclosure stays readable instead of inheriting the action gradient. */
 html body .member-page .engagement-order-page button.group[aria-expanded][class~="bg-primary/5"] {
-  background: hsl(var(--z3-surface)) !important;
+  background: hsl(var(--primary) / 0.07) !important;
   color: hsl(var(--z3-ink)) !important;
-  border: 2px solid hsl(var(--primary)) !important;
+  border: 2px solid hsl(var(--primary) / 0.45) !important;
   box-shadow: none !important;
   min-height: 56px;
 }
@@ -127,7 +127,7 @@ html body .member-page .engagement-order-page button.group[aria-expanded][class~
   font-size: 12px;
 }
 html body .member-page .engagement-order-page button.group[aria-expanded][class~="bg-primary/5"]:is(:hover, [data-state="open"]) {
-  background: hsl(var(--z3-bg)) !important;
+  background: hsl(var(--primary) / 0.12) !important;
 }
 html body .member-page .engagement-order-page button.group[aria-expanded][class~="bg-primary/5"]:focus-visible {
   outline: 3px solid hsl(var(--primary));

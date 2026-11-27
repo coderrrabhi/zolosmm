@@ -8,6 +8,8 @@ import {
 import { PageMeta } from '@/components/seo/PageMeta';
 import { PublicReviews } from '@/components/reviews/PublicReviews';
 import './zolo-home.css';
+import { PacingShowcase } from '@/components/landing/PacingShowcase';
+import '@/components/landing/pacing-showcase.css';
 
 const navLinks = [
   { label: 'Features', href: '#features' },
@@ -183,39 +185,7 @@ const Index = () => {
         ))}
       </section>
 
-      <section id="curves" className="zh-wrap zh-section">
-        <h2>See how your order is delivered</h2>
-        <p className="zh-sub">Pick a delivery style and time window to preview how engagement arrives on your post.</p>
-        <div className="zh-show z3-raised">
-          <div className="zh-chips">
-            {(Object.keys(curves) as CurveKey[]).map((k) => (
-              <button key={k} onClick={() => setCurve(k)} className={`zh-chip ${curve === k ? 'z3-btn' : 'z3-btn-soft'}`}>{curves[k].label}</button>
-            ))}
-          </div>
-          <div className="zh-show-grid">
-            <div className="zh-show-info z3-raised-sm">
-              <span className="zh-tag">{c.label} delivery</span>
-              <h3>{c.note}</h3>
-              <div className="zh-phases">
-                <div className="z3-pressed"><b>Warm-up</b><span>0–{Math.round(hours * 0.2)}h</span></div>
-                <div className="z3-pressed"><b>Peak</b><span>{Math.round(hours * 0.2)}–{Math.round(hours * 0.65)}h</span></div>
-                <div className="z3-pressed"><b>Finish</b><span>{Math.round(hours * 0.65)}–{hours}h</span></div>
-              </div>
-              <div className="zh-durations">
-                <span>Time window</span>
-                {durations.map((d) => (
-                  <button key={d} onClick={() => setHours(d)} className={`zh-chip zh-chip-sm ${hours === d ? 'z3-btn' : 'z3-btn-soft'}`}>{d}h</button>
-                ))}
-              </div>
-            </div>
-            <div className="zh-show-chart z3-raised-sm">
-              <div className="zh-chart-head"><span>Delivery preview</span><b>{c.label} • {hours}h</b></div>
-              <CurveChart pts={c.pts} />
-              <div className="zh-axis">{[0, 0.25, 0.5, 0.75, 1].map((f) => <span key={f}>{Math.round(hours * f)}h</span>)}</div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <PacingShowcase />
 
       <section id="how" className="zh-wrap zh-section">
         <h2>Start in under three minutes</h2>
