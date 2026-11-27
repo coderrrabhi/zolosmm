@@ -10,7 +10,8 @@ import {
   Eye, Heart, MessageCircle, Bookmark, Share2,
   Clock, Play, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Zap, CalendarClock,
-  Pause, PlayCircle, Ban, RefreshCw as Repost, Repeat, UserPlus, Bell, Clock as ClockIcon
+  Pause, PlayCircle, Ban, RefreshCw as Repost, Repeat, UserPlus, Bell, Clock as ClockIcon,
+  Pencil,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -79,6 +80,7 @@ export function TypeHistoryCard({
   servicePrice,
   itemId,
   itemStatus,
+  onEditRun,
   onPause,
   onResume,
   onCancel,
@@ -363,7 +365,7 @@ export function TypeHistoryCard({
                 // Smart status: provider_status > mapped internal status
                 const getDisplayStatus = () => {
                   if (isAutoCompletedCancel) return 'Completed';
-                  if (run.provider_status) return run.provider_status;
+                  if (run.provider_status) return (run.provider_order_id && /^(pending|awaiting)$/i.test(run.provider_status)) ? 'Processing' : run.provider_status;
                   if (run.status === 'cancelled') return isAutoCompletedCancel ? 'Completed' : 'CANCELLED';
                   if (isFailed) return 'FAILED';
                   if (isActive) return 'Processing';
@@ -473,6 +475,12 @@ export function TypeHistoryCard({
                           </div>
                         )}
 
+                        {isPending && (
+                          <Button variant="outline" size="sm" className="h-8" onClick={(e) => { e.stopPropagation(); onEditRun(run); }}>
+                            <Pencil className="h-3 w-3 mr-1" />
+                            Edit
+                          </Button>
+                        )}
                       </div>
                     </div>
 

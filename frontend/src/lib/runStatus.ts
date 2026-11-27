@@ -33,7 +33,8 @@ export const getEffectiveRunStatus = (run: any): EffectiveRunStatus => {
   const remains = run?.provider_remains;
   if (run?.provider_order_id && typeof remains === 'number' && remains <= 0) return 'completed';
 
-  if (ps === 'pending' || ps === 'awaiting') return 'pending';
+  // Accepted by the provider (has an order id) = processing for the user, even if the provider says pending.
+  if (ps === 'pending' || ps === 'awaiting') return run?.provider_order_id ? 'started' : 'pending';
   if (ps === 'in progress' || ps === 'inprogress' || ps === 'processing' || ps === 'processing order') {
     return 'started';
   }
@@ -54,7 +55,7 @@ export const getEffectiveRunStatus = (run: any): EffectiveRunStatus => {
 // Human label for badges: prefer the live provider wording when we have it.
 export const getRunStatusLabel = (run: any): string => {
   const effective = getEffectiveRunStatus(run);
-  if (effective === 'started') return 'In progress';
+  if (effective === 'started') return 'Processing';
   if (effective === 'completed') return 'Completed';
   if (effective === 'failed') return 'Failed';
   if (effective === 'cancelled') return 'Cancelled';

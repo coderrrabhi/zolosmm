@@ -4,7 +4,8 @@ import { Progress } from "@/components/ui/progress";
 import { format, formatDistanceToNow } from "date-fns";
 import {
   Eye, Heart, MessageCircle, Bookmark, Share2,
-  Clock, Play, CheckCircle2, XCircle, Timer, RefreshCw, Loader2, TrendingUp, CalendarClock
+  Clock, Play, CheckCircle2, XCircle, Timer, RefreshCw, Loader2, TrendingUp, CalendarClock,
+  Pencil,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useState } from "react";
@@ -262,7 +263,7 @@ export function MergedTimeline({ runs, nextRun, onRefresh, typeTargets = [] }: M
             // If pending + future = "Scheduled", pending + past = "Queued"
             const getDisplayStatus = () => {
               if (isAutoCompletedCancel) return 'Completed';
-              if (run.provider_status) return run.provider_status;
+              if (run.provider_status) return (run.provider_order_id && /^(pending|awaiting)$/i.test(run.provider_status)) ? 'Processing' : run.provider_status;
               if (isCancelled) return 'CANCELLED';
               if (isFailed) return 'FAILED';
               if (isActive) return 'Processing';
@@ -452,7 +453,7 @@ export function MergedTimeline({ runs, nextRun, onRefresh, typeTargets = [] }: M
                           {run.provider_status === 'Pending' && (
                             <span className="flex items-center gap-2">
                               <Clock className="h-3.5 w-3.5" />
-                              ⏳ Queued at provider, starting soon...
+                              ✅ Sent to provider — processing, delivery starts soon
                             </span>
                           )}
                           {/* Auto-completed = Order IS placed, delivery continues at provider */}
@@ -527,6 +528,13 @@ export function MergedTimeline({ runs, nextRun, onRefresh, typeTargets = [] }: M
                           <RefreshCw className="h-4 w-4 mr-1.5" />
                         )}
                         Check Now
+                      </Button>
+                    )}
+
+                    {isPending && (
+                      <Button variant="ghost" size="sm" className="h-8 px-3 text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); onEditRun(run); }}>
+                        <Pencil className="h-4 w-4 mr-1.5" />
+                        Edit
                       </Button>
                     )}
                   </div>
